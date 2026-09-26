@@ -106,8 +106,14 @@ async function render(videoId: string) {
 
     // 4. Join scenes and burn in captions.
     stage("Adding captions and finishing", 80);
+    // The final step runs inside the work folder and refers to files by bare name: FFmpeg's
+    // filter syntax treats ":" as a separator, so Windows paths like C:\... break it.
     const list = path.join(work, "segments.txt");
-    fs.writeFileSync(list, segments.map((s) => `file '${s.replace(/'/g, "'\\''")}'`).join("\n"));
+    fs.writeFileSync(list, segments.map((s) => `file '${path.basename(s)}'`).join("\n"));
+    fs.mkdirSync(path.join(work, "fonts"));
+    for (const font of fs.readdirSync(FONT_DIR).filter((f) => /\.(ttf|otf)$/i.test(f))) {
+      fs.copyFileSync(path.join(FONT_DIR, font), path.join(work, "fonts", font));
+    }
     const captions = path.join(work, "captions.ass");
     fs.writeFileSync(captions, buildCaptions(voices, portrait, W, H));
     const total = voices.reduce((sum, v) => sum + v.duration, 0);
@@ -115,13 +121,14 @@ async function render(videoId: string) {
     await ffmpeg(
       [
         "-f", "concat", "-safe", "0", "-i", list,
-        "-vf", `ass=${filterPath(captions)}:fontsdir=${filterPath(FONT_DIR)}`,
+        "-vf", "ass=captions.ass:fontsdir=fonts",
         "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "192k",
         "-movflags", "+faststart",
         output,
       ],
       (seconds) => stage("Adding captions and finishing", 80 + Math.min(19, (19 * seconds) / total)),
+      work,
     );
 
     const size = fs.statSync(output).size;
@@ -211,14 +218,11 @@ function assTime(seconds: number) {
   return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(cs % 100).padStart(2, "0")}`;
 }
 
-/** Escapes a path for use inside an FFmpeg filter argument. */
-const filterPath = (p: string) => p.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'").replace(/,/g, "\\,");
-
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "video";
 
-function ffmpeg(args: string[], onProgress?: (seconds: number) => void) {
+function ffmpeg(args: string[], onProgress?: (seconds: number) => void, cwd?: string) {
   return new Promise<void>((resolve, reject) => {
-    const proc = spawn(ffmpegPath!, ["-y", "-hide_banner", "-nostdin", ...args]);
+    const proc = spawn(ffmpegPath!, ["-y", "-hide_banner", "-nostdin", ...args], { cwd });
     let log = "";
     proc.stderr.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
