@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100;
+  }
+  input, textarea, select {
+    @apply w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500/20 dark:border-zinc-700 dark:bg-zinc-900;
+  }
+  input[type="checkbox"] {
+    @apply w-auto;
+  }
+  label {
+    @apply block text-sm font-medium text-zinc-700 dark:text-zinc-300;
+  }
+}
+
+@utility card {
+  @apply rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900;
+}
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50;
+}
+@utility btn-primary {
+  @apply btn bg-red-600 text-white hover:bg-red-700;
+}
+@utility btn-secondary {
+  @apply btn border border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800;
+}
+@utility btn-ghost {
+  @apply btn text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800;
+}
+@utility muted {
+  @apply text-sm text-zinc-500 dark:text-zinc-400;
+}

@@ -1,0 +1,186 @@
+import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
+
+export const DATA_DIR = path.resolve(process.env.DATA_DIR ?? "data");
+export const UPLOAD_DIR = path.join(DATA_DIR, "uploads");
+const DB_FILE = path.join(DATA_DIR, "db.json");
+
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+export type VideoStatus = "idea" | "scripted" | "ready" | "scheduled" | "published" | "failed";
+export type VideoFormat = "short" | "long";
+
+export interface YouTubeLink {
+  channelId: string;
+  title: string;
+  thumbnail?: string;
+  refreshToken: string;
+  connectedAt: string;
+}
+
+export interface Channel {
+  id: string;
+  name: string;
+  niche: string;
+  audience: string;
+  tone: string;
+  language: string;
+  /** 0 = Sunday … 6 = Saturday */
+  postingDays: number[];
+  /** "HH:MM" in the browser's local time */
+  postingTime: string;
+  categoryId: string;
+  youtube?: YouTubeLink;
+  stats?: { subscribers: number; views: number; videos: number; updatedAt: string };
+  createdAt: string;
+}
+
+export interface StoredFile {
+  path: string;
+  name: string;
+  size: number;
+  mimeType: string;
+}
+
+export interface Video {
+  id: string;
+  channelId: string;
+  status: VideoStatus;
+  format: VideoFormat;
+  title: string;
+  hook: string;
+  keyword: string;
+  angle: string;
+  script: string;
+  titleOptions: string[];
+  description: string;
+  tags: string[];
+  videoFile?: StoredFile;
+  thumbnailFile?: StoredFile;
+  scheduledAt?: string;
+  youtubeVideoId?: string;
+  error?: string;
+  stats?: { views: number; likes: number; comments: number; updatedAt: string };
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface Data {
+  channels: Channel[];
+  videos: Video[];
+}
+
+function load(): Data {
+  try {
+    return JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { channels: [], videos: [] };
+    throw err;
+  }
+}
+
+const data: Data = load();
+
+/** Writes the whole store atomically so a crash mid-write can't corrupt it. */
+function save() {
+  const tmp = `${DB_FILE}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+  fs.renameSync(tmp, DB_FILE);
+}
+
+export const newId = () => crypto.randomUUID();
+const now = () => new Date().toISOString();
+
+export const db = {
+  channels: () => data.channels,
+  channel: (id: string) => data.channels.find((c) => c.id === id),
+
+  createChannel(input: Omit<Channel, "id" | "createdAt">): Channel {
+    const channel: Channel = { ...input, id: newId(), createdAt: now() };
+    data.channels.push(channel);
+    save();
+    return channel;
+  },
+
+  updateChannel(id: string, patch: Partial<Channel>): Channel | undefined {
+    const channel = db.channel(id);
+    if (!channel) return undefined;
+    Object.assign(channel, patch, { id });
+    save();
+    return channel;
+  },
+
+  deleteChannel(id: string) {
+    for (const v of data.videos.filter((v) => v.channelId === id)) removeFiles(v);
+    data.channels = data.channels.filter((c) => c.id !== id);
+    data.videos = data.videos.filter((v) => v.channelId !== id);
+    save();
+  },
+
+  videos: (channelId?: string) =>
+    channelId ? data.videos.filter((v) => v.channelId === channelId) : data.videos,
+  video: (id: string) => data.videos.find((v) => v.id === id),
+
+  createVideo(input: Partial<Video> & Pick<Video, "channelId" | "title">): Video {
+    const video: Video = {
+      status: "idea",
+      format: "short",
+      hook: "",
+      keyword: "",
+      angle: "",
+      script: "",
+      titleOptions: [],
+      description: "",
+      tags: [],
+      ...input,
+      id: newId(),
+      createdAt: now(),
+      updatedAt: now(),
+    };
+    data.videos.push(video);
+    save();
+    return video;
+  },
+
+  updateVideo(id: string, patch: Partial<Video>): Video | undefined {
+    const video = db.video(id);
+    if (!video) return undefined;
+    Object.assign(video, patch, { id, updatedAt: now() });
+    save();
+    return video;
+  },
+
+  deleteVideo(id: string) {
+    const video = db.video(id);
+    if (video) removeFiles(video);
+    data.videos = data.videos.filter((v) => v.id !== id);
+    save();
+  },
+};
+
+function removeFiles(video: Video) {
+  for (const file of [video.videoFile, video.thumbnailFile]) {
+    if (file) fs.rm(file.path, { force: true }, () => {});
+  }
+}
+
+/** Strips secrets (the YouTube refresh token) before sending a channel to the browser. */
+export function publicChannel(channel: Channel) {
+  const { youtube, ...rest } = channel;
+  return {
+    ...rest,
+    youtube: youtube && {
+      channelId: youtube.channelId,
+      title: youtube.title,
+      thumbnail: youtube.thumbnail,
+      connectedAt: youtube.connectedAt,
+    },
+  };
+}
+
+/** Hides server file paths from the browser. */
+export function publicVideo(video: Video) {
+  const strip = (f?: StoredFile) => f && { name: f.name, size: f.size, mimeType: f.mimeType };
+  return { ...video, videoFile: strip(video.videoFile), thumbnailFile: strip(video.thumbnailFile) };
+}
