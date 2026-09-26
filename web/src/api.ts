@@ -13,6 +13,8 @@ export interface Channel {
   categoryId: string;
   voiceId?: string;
   affiliateLinks?: string;
+  look?: "cinematic" | "clean" | "warm";
+  musicFile?: FileInfo;
   youtube?: { channelId: string; title: string; thumbnail?: string; connectedAt: string };
   stats?: { subscribers: number; views: number; videos: number; updatedAt: string };
   createdAt: string;
@@ -103,6 +105,12 @@ export const api = {
   deleteChannel: (id: string) => request("DELETE", `/api/channels/${id}`),
   generateIdeas: (id: string, count: number, focus?: string) =>
     request<Video[]>("POST", `/api/channels/${id}/ideas`, { count, focus: focus || undefined }),
+  uploadMusic: (id: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<Channel>("POST", `/api/channels/${id}/music`, form);
+  },
+  deleteMusic: (id: string) => request<Channel>("DELETE", `/api/channels/${id}/music`),
   syncChannel: (id: string) => request<Channel>("POST", `/api/channels/${id}/sync`),
   disconnectYouTube: (id: string) => request<Channel>("POST", `/api/channels/${id}/youtube/disconnect`),
   connectYouTubeUrl: (id: string) => `/api/channels/${id}/youtube/connect`,

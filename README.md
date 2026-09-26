@@ -6,8 +6,8 @@ Plan, write and schedule videos for several YouTube channels from one place.
 
 1. **Ideas.** The AI suggests videos people search for, tailored to each channel.
 2. **Research.** The AI searches the web and collects facts, marked confirmed, disputed or theory, with source links.
-3. **Script.** The AI writes a hook-first script from the research. You review and edit it.
-4. **Make the video.** One click produces an ElevenLabs voiceover, matching Pexels stock footage (with a slow zoom on photos) and word-timed captions, rendered with FFmpeg as a vertical Short or a horizontal video. You watch the preview. You can also upload a video made anywhere else.
+3. **Script.** The AI writes a hook-first script from the research, then a second "tough editor" pass rewrites it to cut clichés, sharpen the hook and add cliffhangers. You review and edit it.
+4. **Make the video.** One click produces an expressive ElevenLabs voiceover, a new Pexels shot every few seconds with slow camera movement, a color grade per channel (cinematic, clean or warm), word-by-word captions (the spoken word is highlighted gold in Shorts) and optional background music that ducks under the voice, rendered with FFmpeg as a vertical Short or a horizontal video. You watch the preview. You can also upload a video made anywhere else.
 5. **Title, description and tags.** The AI writes 5 title options, an SEO description, tags, disclaimers and your affiliate links.
 6. **Schedule.** The app uploads the video to YouTube with a publish time, and YouTube publishes it even if this app is offline.
 7. **Grow.** Channel and per-video views, likes and comments show on the dashboard.
@@ -80,7 +80,7 @@ On your own computer only you can open the app, so a password is optional (Setup
 ## Limits
 
 - The video maker uses stock footage, so the result is a documentary-style video. For more polish, download the file, add music or effects in CapCut, and upload it again.
-- No background music yet. Add it in CapCut, or YouTube Studio's Audio Library, if you want it.
+- Background music is one track per channel (Edit channel → Background music). Use royalty-free music only, such as YouTube Studio's Audio Library or Pixabay Music.
 - Always watch the preview and read the research sources before scheduling. YouTube demonetizes low-effort, mass-produced videos, and the AI can make mistakes.
 
 The caption font is Anton (SIL Open Font License, see `assets/fonts/OFL.txt`).

@@ -88,7 +88,12 @@ export async function generateIdeas(channel: Channel, count: number, existingTit
   const prompt = `${channelBrief(channel)}
 
 Come up with ${count} new video ideas for this channel. Mix YouTube Shorts and long-form videos (about 2 Shorts for every long video).
-Favour topics people actually search for, and ideas the creator can film themselves.
+What makes an idea strong:
+- A proven topic: people already search for it or it has gone viral for other channels, but this idea has a fresh angle.
+- One specific, surprising detail at its core (a name, number, object, date or twist). "The lighthouse keepers who vanished and left dinner on the table" beats "Mysterious disappearances".
+- A curiosity gap the title opens and the video pays off honestly. No clickbait the video can't deliver.
+- Strong emotion: awe, dread, outrage, disbelief, or "wait, that's real?".
+- Can be made with narration and stock footage or photos (no filming required).
 ${focus ? `Focus on: ${focus}\n` : ""}${
     existingTitles.length
       ? `Do not repeat these existing videos:\n${existingTitles.map((t) => `- ${t}`).join("\n")}\n`
@@ -100,7 +105,7 @@ ${focus ? `Focus on: ${focus}\n` : ""}${
       type: "array",
       items: obj({
         title: str("Clickable, honest title under 70 characters"),
-        hook: str("What is said or shown in the first 3 seconds"),
+        hook: str("The exact first sentence the narrator says: the most surprising specific detail, no scene-setting"),
         format: { type: "string", enum: ["short", "long"] },
         keyword: str("Main search phrase this video should rank for"),
         angle: str("One sentence: what makes this video different or worth watching"),
@@ -173,23 +178,70 @@ Use reliable sources: official records, major news outlets, museums, universitie
   return { notes, sources };
 }
 
+/** Techniques that keep viewers watching; shared by the writer and the editor pass. */
+function scriptCraft(video: Video) {
+  const shape =
+    video.format === "short"
+      ? `SHORT (vertical, 35-55 seconds, about 110-140 spoken words):
+- Line 1 is the hook: the single most surprising, specific detail, stated in under 12 words. No scene-setting, no "Did you know", no question as the opener.
+- Every following sentence adds new information or raises the stakes. Cut anything that repeats or explains the obvious.
+- Build to one twist or reveal near the end.
+- The last line should connect back to the first so the Short loops smoothly. No "subscribe for more" (a 3-word CTA at most, or none).`
+      : `LONG VIDEO (8-11 minutes, about 1,300-1,700 spoken words):
+- Cold open (first 20-30 seconds): drop straight into the most dramatic moment of the story, then cut away with a question the video will answer.
+- Promise: one sentence on what the viewer will know by the end.
+- 3-5 chapters. Each chapter reveals something new and ends on an open loop or cliffhanger that pulls into the next ("But that wasn't the strangest part.").
+- Around 40% in, one short natural call to subscribe, tied to the story.
+- Climax: the biggest reveal. Then resolution: what we know, what is still unknown, and why it matters.
+- Final line teases a related story to watch next.`;
+
+  return `${shape}
+
+VOICE AND STYLE (this is narration for a voiceover, so write for the ear):
+- Short sentences. Mix in a longer one for rhythm. One idea per sentence.
+- Concrete and sensory: names, places, dates, numbers, what it looked, sounded and felt like. Show, don't summarise.
+- Use present tense for dramatic moments ("It's 2 a.m. The radio goes silent.").
+- Occasionally speak to the viewer as "you" to pull them in.
+- Create tension with open questions, contrasts and reveals, not with adjectives.
+- Never use these clichés: "in this video", "let's dive in", "buckle up", "without further ado", "little did they know", "shrouded in mystery", "the rest is history", "imagine a world", "delve", "tapestry", "hey guys", "welcome back".
+- No filler, no rhetorical question chains, no moralising at the end.
+- Put visual directions on their own line in [square brackets]; they are not read aloud.`;
+}
+
 export async function generateScript(channel: Channel, video: Video) {
-  const prompt = `${channelBrief(channel)}
+  const research = video.research
+    ? `\nResearch notes (base every fact on these; say "reportedly" or "some believe" for anything marked Disputed or Theory, and respect the CAUTION section):\n${video.research.notes}\n`
+    : "";
+
+  const draft = await generate<{ script: string }>(
+    `${channelBrief(channel)}
 
 ${videoBrief(video)}
-${
-  video.research
-    ? `\nResearch notes (base every fact on these; say "reportedly" or "some believe" for anything marked Disputed or Theory, and respect the CAUTION section):\n${video.research.notes}\n`
-    : ""
-}
-Write the full script for this video, ready to read aloud.
-- Start with the hook. No "hey guys, welcome back".
-- Put filming or on-screen directions on their own line in square brackets, e.g. [Close-up of cracked screen].
-- ${video.format === "short" ? "Keep it to about 130-150 spoken words." : "Use short sections with a clear payoff, and re-hook viewers every 60-90 seconds."}
-- End with one natural call to action (subscribe, or watch a related video).`;
+${research}
+Write the full narration script for this video, ready to be read aloud by a voiceover.
 
-  const result = await generate<{ script: string }>(prompt, obj({ script: str("The complete script") }));
-  return result.script;
+${scriptCraft(video)}`,
+    obj({ script: str("The complete script") }),
+  );
+
+  // A second pass as a tough editor reliably makes the hook sharper and cuts flat lines.
+  const edited = await generate<{ problems: string; script: string }>(
+    `${channelBrief(channel)}
+
+${videoBrief(video)}
+${research}
+You are the channel's toughest script editor. Here is a draft:
+
+${draft.script}
+
+First, list the biggest problems briefly: weak hook, slow or generic lines, clichés, vague statements, missing tension, facts not supported by the research, lines that are hard to say aloud.
+Then rewrite the whole script to fix them. Keep every fact accurate, keep it the right length, and make every line earn its place.
+
+The standard it must meet:
+${scriptCraft(video)}`,
+    obj({ problems: str("Short list of what was wrong"), script: str("The improved complete script") }),
+  );
+  return edited.script;
 }
 
 export interface Metadata {
@@ -223,7 +275,8 @@ Write the YouTube upload details for this video:
 
 export interface Scene {
   narration: string;
-  query: string;
+  /** One stock-footage search per shot; the scene's time is split between them. */
+  shots: string[];
   fallbackQuery: string;
 }
 
@@ -236,21 +289,27 @@ ${video.script}
 
 Turn this script into scenes for an automatically edited ${video.format === "short" ? "vertical YouTube Short" : "horizontal YouTube video"}.
 - "narration": the exact words the narrator says in this scene, copied from the script in order. Remove anything in [square brackets] and any speaker labels. Together, the scenes must contain the whole spoken script.
-- Keep each scene to 1-2 sentences (about ${video.format === "short" ? "3-6" : "6-12"} seconds of speech) so the visuals change often.
-- "query": 2-4 English words to search a stock video library (Pexels) for footage that fits the scene. Describe something filmable and concrete ("old library bookshelves", "storm over ocean"), not abstract ideas or names of real people.
-- "fallbackQuery": a broader 1-2 word search in case the first finds nothing ("library", "storm").`;
+- Keep each scene to 1-2 sentences.
+- "shots": the visuals for the scene, one per ${video.format === "short" ? "2-3" : "3-5"} seconds of speech (1-3 shots per scene), so the picture changes often like a real edit.
+  Each shot is 2-5 English words to search a stock video library (Pexels). Describe something filmable, concrete and atmospheric ("candle flickering in dark room", "fog rolling over pine forest", "hands turning old book pages"), not abstract ideas or names of real people.
+  Match the mood and era of the story: for historical stories prefer old, timeless or vintage-looking subjects (ruins, candles, old documents, stone, fog, black and white) and avoid modern cars, phones or people in modern clothes.
+  Vary the shots: mix wide establishing shots, close-up details and moody textures. Don't repeat the same subject.
+- "fallbackQuery": a broad 1-2 word search in case a shot finds nothing ("forest", "old paper").`;
 
   const result = await generate<{ scenes: Scene[] }>(prompt, obj({
     scenes: {
       type: "array",
       items: obj({
         narration: str("Spoken words for this scene"),
-        query: str("Specific stock footage search"),
+        shots: { type: "array", items: str("Stock footage search for one shot") },
         fallbackQuery: str("Broader stock footage search"),
       }),
     },
   }));
-  const scenes = result.scenes.filter((s) => s.narration.trim());
+  const scenes = result.scenes
+    .filter((s) => s.narration.trim())
+    .map((s) => ({ ...s, shots: s.shots.filter((q) => q.trim()).slice(0, 3) }))
+    .map((s) => ({ ...s, shots: s.shots.length ? s.shots : [s.fallbackQuery] }));
   if (!scenes.length) throw new Error("The script has no spoken lines to narrate.");
   return scenes;
 }

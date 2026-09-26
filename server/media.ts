@@ -53,7 +53,12 @@ export interface Word {
 export async function speak(text: string, voiceId: string, outFile: string) {
   const data = await eleven(`/v1/text-to-speech/${voiceId}/with-timestamps?output_format=mp3_44100_128`, {
     method: "POST",
-    body: JSON.stringify({ text, model_id: ELEVEN_MODEL }),
+    body: JSON.stringify({
+      text,
+      model_id: ELEVEN_MODEL,
+      // Less "stability" and some "style" make narration more expressive and less monotone.
+      voice_settings: { stability: 0.38, similarity_boost: 0.8, style: 0.35, use_speaker_boost: true },
+    }),
   });
   fs.writeFileSync(outFile, Buffer.from(data.audio_base64, "base64"));
 

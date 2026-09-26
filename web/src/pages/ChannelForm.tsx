@@ -14,6 +14,7 @@ const EMPTY: Omit<Channel, "id" | "createdAt" | "youtube" | "stats"> = {
   categoryId: "22",
   voiceId: "",
   affiliateLinks: "",
+  look: "clean",
 };
 
 const PRESETS = [
@@ -24,6 +25,7 @@ const PRESETS = [
     tone: "Clear, upbeat and honest. Show real pros and cons, no hype",
     categoryId: "28",
     postingDays: [1, 3, 5],
+    look: "clean" as const,
   },
   {
     name: "Money Moves",
@@ -32,6 +34,7 @@ const PRESETS = [
     tone: "Practical, motivating and realistic. Never promise quick riches; show real numbers and risks",
     categoryId: "27",
     postingDays: [2, 4, 6],
+    look: "warm" as const,
   },
   {
     name: "Untold History",
@@ -40,6 +43,7 @@ const PRESETS = [
     tone: "Cinematic storyteller: suspenseful, vivid and respectful to real victims",
     categoryId: "27",
     postingDays: [0, 3, 5],
+    look: "cinematic" as const,
   },
 ];
 
@@ -142,6 +146,14 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
             <p className="muted">Add your ElevenLabs key on the <a className="underline" href="#/setup">Setup</a> page to choose a voice.</p>
           )}
         </Field>
+        <Field label="Video look" hint="The color style of videos the app makes automatically.">
+          <select value={form.look ?? "clean"} onChange={(e) => set("look", e.target.value as Channel["look"])}>
+            <option value="cinematic">Cinematic: dark and moody, with a vignette (history, mystery, true crime)</option>
+            <option value="clean">Clean: bright and crisp (tech, tutorials)</option>
+            <option value="warm">Warm: friendly and golden (money, lifestyle)</option>
+          </select>
+        </Field>
+        {existing && <MusicField channel={existing} onChange={reloadChannels} />}
         <Field label="Affiliate links (optional)" hint="One per line, e.g. “Notion AI: https://…”. The AI adds relevant ones to video descriptions.">
           <textarea rows={3} value={form.affiliateLinks ?? ""} onChange={(e) => set("affiliateLinks", e.target.value)} />
         </Field>
@@ -176,6 +188,40 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
         </div>
       </form>
     </div>
+  );
+}
+
+function MusicField({ channel, onChange }: { channel: Channel; onChange: () => Promise<void> }) {
+  const { busy, error, run } = useAction();
+  return (
+    <Field
+      label="Background music (optional)"
+      hint="Plays quietly under the voice and gets softer while the narrator speaks. Use royalty-free music only: YouTube Studio → Audio Library, or pixabay.com/music."
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        {channel.musicFile && <span className="text-sm">🎵 {channel.musicFile.name}</span>}
+        <label className="btn-secondary cursor-pointer">
+          {busy === "upload" && <Spinner />}
+          {channel.musicFile ? "Replace" : "Upload music"}
+          <input
+            type="file"
+            accept="audio/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (file) run("upload", async () => { await api.uploadMusic(channel.id, file); await onChange(); });
+            }}
+          />
+        </label>
+        {channel.musicFile && (
+          <button type="button" className="btn-ghost text-red-600" disabled={!!busy} onClick={() => run("remove", async () => { await api.deleteMusic(channel.id); await onChange(); })}>
+            Remove
+          </button>
+        )}
+      </div>
+      <ErrorBox error={error} />
+    </Field>
   );
 }
 

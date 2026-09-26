@@ -50,8 +50,9 @@ export default function App() {
 
   const init = useCallback(async () => {
     const s = await api.status();
-    setStatus(s);
+    // Load channels before showing pages, so forms that read a channel start with its data.
     if (s.loggedIn) await reloadChannels();
+    setStatus(s);
   }, [reloadChannels]);
 
   useEffect(() => {

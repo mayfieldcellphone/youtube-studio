@@ -129,6 +129,7 @@ const channelInput = z.object({
   postingTime: z.string().regex(/^\d{2}:\d{2}$/).default("17:00"),
   categoryId: z.string().regex(/^\d+$/).default("22"),
   voiceId: z.string().max(100).optional(),
+  look: z.enum(["cinematic", "clean", "warm"]).optional(),
   affiliateLinks: z.string().max(3000).optional(),
 });
 
@@ -346,6 +347,25 @@ app.post("/api/videos/:id/files/:kind", upload.single("file"), (req, res) => {
     return reject("Unknown file type.");
   }
   res.json(publicVideo(db.updateVideo(video.id, patch)!));
+});
+
+app.post("/api/channels/:id/music", upload.single("file"), (req, res) => {
+  const channel = getChannel(String(req.params.id));
+  const file = req.file;
+  if (!file) throw new HttpError(400, "No file received.");
+  if (!file.mimetype.startsWith("audio/")) {
+    fs.rm(file.path, { force: true }, () => {});
+    throw new HttpError(400, "Please choose an audio file (MP3, WAV or M4A).");
+  }
+  if (channel.musicFile) fs.rm(channel.musicFile.path, { force: true }, () => {});
+  const musicFile = { path: file.path, name: file.originalname, size: file.size, mimeType: file.mimetype };
+  res.json(publicChannel(db.updateChannel(channel.id, { musicFile })!));
+});
+
+app.delete("/api/channels/:id/music", (req, res) => {
+  const channel = getChannel(req.params.id);
+  if (channel.musicFile) fs.rm(channel.musicFile.path, { force: true }, () => {});
+  res.json(publicChannel(db.updateChannel(channel.id, { musicFile: undefined })!));
 });
 
 app.get("/api/videos/:id/thumbnail", (req, res) => {

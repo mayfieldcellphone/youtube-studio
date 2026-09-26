@@ -10,6 +10,7 @@ fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 export type VideoStatus = "idea" | "scripted" | "ready" | "scheduled" | "published" | "failed";
 export type VideoFormat = "short" | "long";
+export type VideoLook = "cinematic" | "clean" | "warm";
 
 export interface YouTubeLink {
   channelId: string;
@@ -35,6 +36,10 @@ export interface Channel {
   voiceId?: string;
   /** Affiliate/product links the AI may add to descriptions, one per line */
   affiliateLinks?: string;
+  /** Color grade for automatically made videos */
+  look?: VideoLook;
+  /** Background music mixed quietly under the narration */
+  musicFile?: StoredFile;
   youtube?: YouTubeLink;
   stats?: { subscribers: number; views: number; videos: number; updatedAt: string };
   createdAt: string;
@@ -134,6 +139,8 @@ export const db = {
 
   deleteChannel(id: string) {
     for (const v of data.videos.filter((v) => v.channelId === id)) removeFiles(v);
+    const music = db.channel(id)?.musicFile;
+    if (music) fs.rm(music.path, { force: true }, () => {});
     data.channels = data.channels.filter((c) => c.id !== id);
     data.videos = data.videos.filter((v) => v.channelId !== id);
     save();
@@ -188,9 +195,10 @@ function removeFiles(video: Video) {
 
 /** Strips secrets (the YouTube refresh token) before sending a channel to the browser. */
 export function publicChannel(channel: Channel) {
-  const { youtube, ...rest } = channel;
+  const { youtube, musicFile, ...rest } = channel;
   return {
     ...rest,
+    musicFile: musicFile && { name: musicFile.name, size: musicFile.size, mimeType: musicFile.mimeType },
     youtube: youtube && {
       channelId: youtube.channelId,
       title: youtube.title,
