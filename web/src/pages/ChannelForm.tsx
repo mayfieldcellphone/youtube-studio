@@ -1,9 +1,9 @@
-import { useState } from "react";
-import { api, CATEGORIES, DAY_NAMES, type Channel } from "../api";
+import { useEffect, useState } from "react";
+import { api, CATEGORIES, DAY_NAMES, type Channel, type Voice } from "../api";
 import { navigate, useApp } from "../App";
 import { ErrorBox, PageHeader, Spinner, useAction } from "../components/ui";
 
-const EMPTY = {
+const EMPTY: Omit<Channel, "id" | "createdAt" | "youtube" | "stats"> = {
   name: "",
   niche: "",
   audience: "",
@@ -12,20 +12,49 @@ const EMPTY = {
   postingDays: [1, 3, 5],
   postingTime: "17:00",
   categoryId: "22",
+  voiceId: "",
+  affiliateLinks: "",
 };
 
-const EXAMPLES = [
-  { name: "Phone Repair Shop", niche: "Phone and tablet repairs: screen, battery and water-damage fixes filmed in my shop", audience: "People with broken phones and DIY fixers", categoryId: "28" },
-  { name: "Phone Tips", niche: "Hidden phone settings, battery tips, fixing slow phones, budget phone buying guides", audience: "Everyday smartphone users", categoryId: "28" },
+const PRESETS = [
+  {
+    name: "AI Tools Explained",
+    niche: "Honest reviews and tutorials of new AI tools: what they do, who they're for, free alternatives, and how to use them to save time or make money",
+    audience: "Beginners, freelancers and small business owners who want to use AI without technical skills",
+    tone: "Clear, upbeat and honest. Show real pros and cons, no hype",
+    categoryId: "28",
+    postingDays: [1, 3, 5],
+  },
+  {
+    name: "Money Moves",
+    niche: "Personal finance and side hustles: saving, budgeting, investing basics, and realistic ways to earn extra income online",
+    audience: "People aged 20-40 who want to earn more, save more and get out of debt",
+    tone: "Practical, motivating and realistic. Never promise quick riches; show real numbers and risks",
+    categoryId: "27",
+    postingDays: [2, 4, 6],
+  },
+  {
+    name: "Untold History",
+    niche: "Mysteries, unsolved cases and fascinating history stories told as gripping documentaries, always based on real sources",
+    audience: "Curious adults who love documentaries, mysteries and true stories",
+    tone: "Cinematic storyteller: suspenseful, vivid and respectful to real victims",
+    categoryId: "27",
+    postingDays: [0, 3, 5],
+  },
 ];
 
 export default function ChannelForm({ channelId }: { channelId?: string }) {
-  const { channels, reloadChannels } = useApp();
+  const { channels, reloadChannels, status } = useApp();
+  const [voices, setVoices] = useState<Voice[]>([]);
   const existing = channels.find((c) => c.id === channelId);
   const [form, setForm] = useState<Omit<Channel, "id" | "createdAt" | "youtube" | "stats">>(
     existing ? { ...EMPTY, ...existing } : EMPTY,
   );
   const { busy, error, run } = useAction();
+
+  useEffect(() => {
+    if (status.voice) api.voices().then(setVoices).catch(() => {});
+  }, [status.voice]);
 
   if (channelId && !existing) return <p className="muted">Channel not found.</p>;
 
@@ -57,8 +86,8 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
 
       {!existing && (
         <div className="mb-6 flex flex-wrap items-center gap-2">
-          <span className="muted">Start from an example:</span>
-          {EXAMPLES.map((ex) => (
+          <span className="muted">Start from a ready-made channel:</span>
+          {PRESETS.map((ex) => (
             <button key={ex.name} className="btn-secondary" onClick={() => setForm({ ...EMPTY, ...ex })}>
               {ex.name}
             </button>
@@ -98,6 +127,23 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
               </option>
             ))}
           </select>
+        </Field>
+        <Field label="Narrator voice" hint="Used when the app makes videos automatically. Pick a deep voice for stories, a bright one for tips.">
+          {status.voice ? (
+            <select value={form.voiceId ?? ""} onChange={(e) => set("voiceId", e.target.value)}>
+              <option value="">Default (George, warm storyteller)</option>
+              {voices.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.name}{v.description ? ` (${v.description})` : ""}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <p className="muted">Add your ElevenLabs key on the <a className="underline" href="#/setup">Setup</a> page to choose a voice.</p>
+          )}
+        </Field>
+        <Field label="Affiliate links (optional)" hint="One per line, e.g. “Notion AI: https://…”. The AI adds relevant ones to video descriptions.">
+          <textarea rows={3} value={form.affiliateLinks ?? ""} onChange={(e) => set("affiliateLinks", e.target.value)} />
         </Field>
         <Field label="Posting days" hint="Used to suggest the next free upload slot.">
           <div className="flex flex-wrap gap-2">

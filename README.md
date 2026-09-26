@@ -2,14 +2,17 @@
 
 Plan, write and schedule videos for several YouTube channels from one place.
 
-**The flow for each video:**
+**The flow for each video** (no camera or microphone needed):
 
 1. **Ideas.** The AI suggests videos people search for, tailored to each channel.
-2. **Script.** The AI writes a hook-first script with filming directions.
-3. **Record and upload.** You film on your phone and edit in CapCut, then upload the final file here.
-4. **Title, description and tags.** The AI writes 5 title options, an SEO description and tags.
-5. **Schedule.** The app uploads the video to YouTube with a publish time, and YouTube publishes it even if this app is offline.
-6. **Grow.** Channel and per-video views, likes and comments show on the dashboard.
+2. **Research.** The AI searches the web and collects facts, marked confirmed, disputed or theory, with source links.
+3. **Script.** The AI writes a hook-first script from the research. You review and edit it.
+4. **Make the video.** One click produces an ElevenLabs voiceover, matching Pexels stock footage (with a slow zoom on photos) and word-timed captions, rendered with FFmpeg as a vertical Short or a horizontal video. You watch the preview. You can also upload a video made anywhere else.
+5. **Title, description and tags.** The AI writes 5 title options, an SEO description, tags, disclaimers and your affiliate links.
+6. **Schedule.** The app uploads the video to YouTube with a publish time, and YouTube publishes it even if this app is offline.
+7. **Grow.** Channel and per-video views, likes and comments show on the dashboard.
+
+Ready-made channel presets: **AI Tools Explained**, **Money Moves** (finance and side hustles) and **Untold History** (mysteries and history).
 
 A kanban board per channel tracks each video from idea to scripted, ready, scheduled and published. A calendar shows every channel's schedule, and each channel's posting days are used to suggest the next free slot.
 
@@ -40,6 +43,16 @@ The in-app **Setup** page has the same steps, plus a copy button for the redirec
 
 Create a key at [console.anthropic.com](https://console.anthropic.com) and set `ANTHROPIC_API_KEY`. The app uses `claude-opus-5`, with automatic fallback if a request is declined.
 
+### ElevenLabs (voiceover)
+
+Create a key at [elevenlabs.io](https://elevenlabs.io) (profile → API Keys) and set `ELEVENLABS_API_KEY`. Choose each channel's narrator voice under **Edit channel**.
+
+### Pexels (stock footage, free)
+
+Get a key at [pexels.com/api](https://www.pexels.com/api/) and set `PEXELS_API_KEY`.
+
+FFmpeg comes with `npm install` (`ffmpeg-static`), so there's nothing extra to install. Rendering takes a few minutes per video and uses a lot of CPU, so renders run one at a time.
+
 ### YouTube (upload + stats)
 
 1. Create a project in [Google Cloud Console](https://console.cloud.google.com/projectcreate).
@@ -58,7 +71,10 @@ Create a key at [console.anthropic.com](https://console.anthropic.com) and set `
 
 Set `APP_PASSWORD` and a random `SESSION_SECRET` before putting the app on the internet. The app holds upload access to your YouTube channels.
 
-## What's not automated (yet)
+## Limits
 
-- **Filming and editing.** CapCut and Canva have no public API for this. Editing happens in CapCut and the final file is uploaded here.
-- **Auto-editing** (captions, silence trimming, Shorts crop) and **thumbnail generation** are the planned next step. Both run server-side with FFmpeg.
+- The video maker uses stock footage, so the result is a documentary-style video. For more polish, download the file, add music or effects in CapCut, and upload it again.
+- No background music yet. Add it in CapCut, or YouTube Studio's Audio Library, if you want it.
+- Always watch the preview and read the research sources before scheduling. YouTube demonetizes low-effort, mass-produced videos, and the AI can make mistakes.
+
+The caption font is Anton (SIL Open Font License, see `assets/fonts/OFL.txt`).

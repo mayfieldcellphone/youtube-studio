@@ -5,11 +5,11 @@ import { useApp } from "../App";
 import { ErrorBox, FormatBadge, PageHeader } from "../components/ui";
 
 const FLOW = [
-  ["Create a channel", "Tell the app what it's about so the AI writes for your audience."],
+  ["Create a channel", "Pick a ready-made niche (AI tools, money, history) or describe your own."],
   ["Connect YouTube", "One click per channel. Uploads and stats then happen from here."],
   ["Generate ideas", "Get 10 ideas people search for, then pick the best."],
-  ["Write the script", "The AI writes a hook-first script you read while filming."],
-  ["Film and edit", "Record on your phone, edit in CapCut, upload the final file."],
+  ["Research and script", "The AI checks facts on the web, then writes a hook-first script. You read and approve it."],
+  ["Make the video", "One click: AI voiceover, stock footage and captions. Watch the preview."],
   ["Title and schedule", "AI writes titles, description and tags. Pick a time and it's queued on YouTube."],
   ["Grow", "Check views here each week and reply to comments on YouTube."],
 ];

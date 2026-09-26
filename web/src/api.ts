@@ -11,6 +11,8 @@ export interface Channel {
   postingDays: number[];
   postingTime: string;
   categoryId: string;
+  voiceId?: string;
+  affiliateLinks?: string;
   youtube?: { channelId: string; title: string; thumbnail?: string; connectedAt: string };
   stats?: { subscribers: number; views: number; videos: number; updatedAt: string };
   createdAt: string;
@@ -32,6 +34,8 @@ export interface Video {
   keyword: string;
   angle: string;
   script: string;
+  research?: { notes: string; sources: { title: string; url: string }[]; createdAt: string };
+  render?: { stage: string; progress: number; error?: string; startedAt: string; finishedAt?: string };
   titleOptions: string[];
   description: string;
   tags: string[];
@@ -45,11 +49,21 @@ export interface Video {
   updatedAt: string;
 }
 
+export interface Voice {
+  id: string;
+  name: string;
+  description: string;
+  previewUrl?: string;
+}
+
 export interface Status {
   loggedIn: boolean;
   passwordRequired: boolean;
   ai: boolean;
   youtube: boolean;
+  voice: boolean;
+  footage: boolean;
+  ffmpeg: boolean;
   redirectUri: string;
 }
 
@@ -88,6 +102,10 @@ export const api = {
   updateVideo: (id: string, v: Partial<Omit<Video, "scheduledAt">> & { scheduledAt?: string | null }) =>
     request<Video>("PATCH", `/api/videos/${id}`, v),
   deleteVideo: (id: string) => request("DELETE", `/api/videos/${id}`),
+  research: (id: string) => request<Video>("POST", `/api/videos/${id}/research`),
+  render: (id: string) => request<Video>("POST", `/api/videos/${id}/render`),
+  voices: () => request<Voice[]>("GET", "/api/voices"),
+  videoUrl: (v: Video) => `/api/videos/${v.id}/video?t=${encodeURIComponent(v.updatedAt)}`,
   generateScript: (id: string) => request<Video>("POST", `/api/videos/${id}/script`),
   generateMetadata: (id: string) => request<Video>("POST", `/api/videos/${id}/metadata`),
   uploadFile: (id: string, kind: "video" | "thumbnail", file: File) => {

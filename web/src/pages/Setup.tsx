@@ -17,7 +17,24 @@ export default function Setup() {
           <li>Open <b>API Keys</b> and create a key.</li>
           <li>Put it in <code>.env</code> as <code>ANTHROPIC_API_KEY=...</code></li>
         </ol>
-        <p className="mt-2 text-xs text-zinc-500">Used for ideas, scripts, titles, descriptions and tags. You pay per use; a script typically costs a few cents.</p>
+        <p className="mt-2 text-xs text-zinc-500">Used for ideas, web research, scripts, titles, descriptions and tags. You pay per use; a fully researched video typically costs well under $1.</p>
+      </Section>
+
+      <Section ok={status.voice} title="AI voiceover (ElevenLabs)">
+        <ol className="list-decimal space-y-1.5 pl-5">
+          <li>Sign up at <Ext href="https://elevenlabs.io">elevenlabs.io</Ext>. The free plan is enough to test; the Starter plan (about $5/month) covers several videos a week.</li>
+          <li>Open your profile → <b>API Keys</b> and create a key with Text to Speech and Voices access.</li>
+          <li>Put it in <code>.env</code> as <code>ELEVENLABS_API_KEY=...</code></li>
+        </ol>
+        <p className="mt-2 text-xs text-zinc-500">Then pick a narrator voice for each channel under Edit channel. Voices you add in ElevenLabs's Voice Library show up there too.</p>
+      </Section>
+
+      <Section ok={status.footage} title="Stock footage (Pexels)">
+        <ol className="list-decimal space-y-1.5 pl-5">
+          <li>Sign up free at <Ext href="https://www.pexels.com/api/">pexels.com/api</Ext> and request an API key (instant).</li>
+          <li>Put it in <code>.env</code> as <code>PEXELS_API_KEY=...</code></li>
+        </ol>
+        <p className="mt-2 text-xs text-zinc-500">Pexels videos and photos are free to use on YouTube, including monetized videos.</p>
       </Section>
 
       <Section ok={status.youtube} title="YouTube upload and stats (Google Cloud)">
@@ -64,7 +81,7 @@ export default function Setup() {
 
       <Section title="Tools that pair well with this app">
         <ul className="space-y-1.5">
-          <li><b>CapCut</b> (free): edit, auto captions, music. Export 1080p and upload the file here.</li>
+          <li><b>CapCut</b> (free): polish a video the app made (add music, effects), or edit your own. Export 1080p and upload it here.</li>
           <li><b>Canva</b> (free): thumbnails. Search “YouTube thumbnail” templates.</li>
           <li><b>vidIQ</b> (free extension): check keyword search volume before you pick an idea.</li>
           <li><b>OpusClip</b>: turn one long video into several Shorts, then add each as a Short here.</li>

@@ -31,6 +31,10 @@ export interface Channel {
   /** "HH:MM" in the browser's local time */
   postingTime: string;
   categoryId: string;
+  /** ElevenLabs voice used for narration */
+  voiceId?: string;
+  /** Affiliate/product links the AI may add to descriptions, one per line */
+  affiliateLinks?: string;
   youtube?: YouTubeLink;
   stats?: { subscribers: number; views: number; videos: number; updatedAt: string };
   createdAt: string;
@@ -43,6 +47,21 @@ export interface StoredFile {
   mimeType: string;
 }
 
+export interface Research {
+  notes: string;
+  sources: { title: string; url: string }[];
+  createdAt: string;
+}
+
+export interface RenderJob {
+  stage: string;
+  /** 0-100 */
+  progress: number;
+  error?: string;
+  startedAt: string;
+  finishedAt?: string;
+}
+
 export interface Video {
   id: string;
   channelId: string;
@@ -53,6 +72,8 @@ export interface Video {
   keyword: string;
   angle: string;
   script: string;
+  research?: Research;
+  render?: RenderJob;
   titleOptions: string[];
   description: string;
   tags: string[];

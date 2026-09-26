@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, CalendarClock, Check, ExternalLink, Film, Image, Sparkles, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, BookOpen, CalendarClock, Check, ExternalLink, Film, Image, Sparkles, Trash2, Upload, Wand2 } from "lucide-react";
 import {
   api,
   compact,
@@ -59,6 +59,18 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
     const others = allVideos.filter((v) => v.id !== video.id);
     setWhen(toLocalInput(video.scheduledAt && !video.youtubeVideoId ? new Date(video.scheduledAt) : nextSlot(channel, others)));
   }, [video, channel, allVideos, when]);
+
+  // While the video maker runs in the background, poll its progress.
+  const renderRunning = Boolean(video?.render && !video.render.finishedAt);
+  useEffect(() => {
+    if (!renderRunning) return;
+    const timer = setInterval(async () => {
+      try {
+        apply(await api.video(videoId));
+      } catch {}
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [renderRunning, videoId, apply]);
 
   // While YouTube upload runs in the background, poll until it finishes.
   useEffect(() => {
@@ -196,6 +208,57 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
 
       <Step
         n={2}
+        title="Research"
+        done={Boolean(video.research)}
+        action={
+          status.ai && (
+            <button
+              className="btn-secondary"
+              disabled={!!busy}
+              onClick={() => {
+                if (!video.research || confirm("Replace the current research?")) ai("research", () => api.research(video.id));
+              }}
+            >
+              {busy === "research" ? <Spinner /> : <BookOpen className="h-4 w-4" />}
+              {busy === "research" ? "Searching the web…" : video.research ? "Research again" : "Research with AI"}
+            </button>
+          )
+        }
+      >
+        {video.research ? (
+          <div className="space-y-4">
+            <div className="max-h-96 overflow-y-auto whitespace-pre-wrap rounded-lg bg-zinc-50 p-4 text-sm leading-relaxed dark:bg-zinc-800/60">
+              {video.research.notes}
+            </div>
+            {video.research.sources.length > 0 && (
+              <div>
+                <p className="mb-2 text-sm font-medium">Sources ({video.research.sources.length})</p>
+                <ul className="space-y-1 text-sm">
+                  {video.research.sources.map((src) => (
+                    <li key={src.url} className="truncate">
+                      <a href={src.url} target="_blank" rel="noreferrer" className="text-red-600 hover:underline">
+                        {src.title || src.url}
+                      </a>
+                      <span className="ml-2 text-xs text-zinc-500">{new URL(src.url).hostname.replace(/^www\./, "")}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <p className="text-xs text-zinc-500">
+              The script is written from these notes. Skim them and open a source or two, especially for claims about real people.
+            </p>
+          </div>
+        ) : (
+          <p className="muted">
+            The AI searches the web and collects facts with their sources, so the script is accurate. Recommended for history,
+            mystery and money topics. Takes about a minute.
+          </p>
+        )}
+      </Step>
+
+      <Step
+        n={3}
         title="Script"
         done={Boolean(video.script.trim())}
         action={
@@ -227,10 +290,75 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
         </p>
       </Step>
 
-      <Step n={3} title="Record and upload your files" done={Boolean(video.videoFile)}>
+      <Step n={4} title="Make the video" done={Boolean(video.videoFile) && !renderRunning}>
+        {!onYouTube && (
+          <div className="mb-5 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="flex items-center gap-2 font-medium">
+                  <Wand2 className="h-4 w-4 text-red-600" /> Make it automatically
+                </p>
+                <p className="muted mt-1">
+                  AI voiceover (ElevenLabs), matching stock footage (Pexels) and captions, edited into a{" "}
+                  {video.format === "short" ? "vertical Short" : "horizontal video"}. Takes a few minutes.
+                </p>
+              </div>
+              {!renderRunning && (
+                <button
+                  className="btn-primary"
+                  disabled={!!busy || !video.script.trim() || !status.voice || !status.footage}
+                  onClick={() => {
+                    if (!video.videoFile || confirm("Replace the current video file with a newly made one?")) ai("render", () => api.render(video.id));
+                  }}
+                >
+                  {busy === "render" ? <Spinner /> : <Wand2 className="h-4 w-4" />}
+                  {video.videoFile ? "Make it again" : "Make video"}
+                </button>
+              )}
+            </div>
+            {(!status.voice || !status.footage) && (
+              <p className="mt-3 text-xs text-amber-700 dark:text-amber-400">
+                Needs your {[!status.voice && "ElevenLabs", !status.footage && "Pexels"].filter(Boolean).join(" and ")} key. See{" "}
+                <a className="underline" href="#/setup">Setup</a>.
+              </p>
+            )}
+            {!video.script.trim() && <p className="mt-3 text-xs text-zinc-500">Write the script first.</p>}
+            {renderRunning && video.render && (
+              <div className="mt-4">
+                <div className="mb-1 flex justify-between text-sm">
+                  <span className="flex items-center gap-2"><Spinner className="h-3 w-3" /> {video.render.stage}</span>
+                  <span className="text-zinc-500">{video.render.progress}%</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+                  <div className="h-full bg-red-600 transition-all" style={{ width: `${video.render.progress}%` }} />
+                </div>
+                <p className="mt-2 text-xs text-zinc-500">You can leave this page. The video keeps being made.</p>
+              </div>
+            )}
+            {video.render?.error && !renderRunning && (
+              <div className="mt-3">
+                <ErrorBox error={`The video maker stopped: ${video.render.error}`} />
+              </div>
+            )}
+          </div>
+        )}
+
+        {video.videoFile && !renderRunning && (
+          <div className="mb-5">
+            <p className="mb-2 text-sm font-medium">Preview: watch it all the way through before you schedule it</p>
+            <video
+              key={video.videoFile.name + video.updatedAt}
+              controls
+              preload="metadata"
+              src={api.videoUrl(video)}
+              className={`rounded-lg bg-black ${video.format === "short" ? "max-h-[70vh]" : "w-full"}`}
+            />
+          </div>
+        )}
+
         <p className="muted mb-4">
-          Film with your phone ({video.format === "short" ? "hold it upright, 9:16" : "hold it sideways, 16:9"}), edit in CapCut
-          (cut pauses, add auto captions and music), export in 1080p, then upload the final file here.
+          Or make it yourself: edit in CapCut or any AI video tool, export in 1080p{" "}
+          ({video.format === "short" ? "vertical 9:16" : "horizontal 16:9"}), and upload the final file here.
         </p>
         <div className="grid gap-4 md:grid-cols-2">
           <FilePicker
@@ -238,7 +366,7 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
             label="Final video"
             accept="video/*"
             file={video.videoFile && `${video.videoFile.name} · ${fileSize(video.videoFile.size)}`}
-            disabled={onYouTube || !!busy}
+            disabled={onYouTube || !!busy || renderRunning}
             busy={busy === "video"}
             progress={uploadProgress}
             onPick={uploadVideoFile}
@@ -260,7 +388,7 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
       </Step>
 
       <Step
-        n={4}
+        n={5}
         title="Title, description and tags"
         done={Boolean(video.title.trim() && video.description.trim())}
         action={
@@ -303,7 +431,7 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
         </div>
       </Step>
 
-      <Step n={5} title="Schedule on YouTube" done={onYouTube}>
+      <Step n={6} title="Schedule on YouTube" done={onYouTube}>
         {onYouTube ? (
           <div className="space-y-3">
             <p className="flex items-center gap-2 text-sm">
@@ -358,10 +486,10 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
                   <label htmlFor="when" className="mb-1.5">Publish time</label>
                   <input id="when" type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} />
                 </div>
-                <button className="btn-primary" disabled={!!busy || !video.videoFile || !when} onClick={() => publish(false)}>
+                <button className="btn-primary" disabled={!!busy || !video.videoFile || !when || renderRunning} onClick={() => publish(false)}>
                   {busy === "publish" ? <Spinner /> : <CalendarClock className="h-4 w-4" />} Schedule on YouTube
                 </button>
-                <button className="btn-ghost" disabled={!!busy || !video.videoFile} onClick={() => publish(true)}>
+                <button className="btn-ghost" disabled={!!busy || !video.videoFile || renderRunning} onClick={() => publish(true)}>
                   Publish now
                 </button>
               </div>

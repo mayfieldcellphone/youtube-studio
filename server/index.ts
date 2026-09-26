@@ -8,7 +8,9 @@ import multer from "multer";
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { db, publicChannel, publicVideo, UPLOAD_DIR, type Video } from "./db";
-import { aiConfigured, generateIdeas, generateMetadata, generateScript } from "./ai";
+import { aiConfigured, generateIdeas, generateMetadata, generateScript, research } from "./ai";
+import { footageConfigured, listVoices, voiceConfigured } from "./media";
+import { ffmpegAvailable, isRendering, recoverInterruptedRenders, startRender } from "./render";
 import { authUrl, completeAuth, redirectUri, syncChannel, uploadAndSchedule, youtubeConfigured } from "./youtube";
 
 const PORT = Number(process.env.PORT ?? 3000);
@@ -38,6 +40,9 @@ app.get("/api/status", (req, res) => {
     passwordRequired: Boolean(PASSWORD),
     ai: aiConfigured(),
     youtube: youtubeConfigured(),
+    voice: voiceConfigured(),
+    footage: footageConfigured(),
+    ffmpeg: ffmpegAvailable(),
     redirectUri: redirectUri(),
   });
 });
@@ -96,6 +101,8 @@ const channelInput = z.object({
   postingDays: z.array(z.number().int().min(0).max(6)).default([1, 3, 5]),
   postingTime: z.string().regex(/^\d{2}:\d{2}$/).default("17:00"),
   categoryId: z.string().regex(/^\d+$/).default("22"),
+  voiceId: z.string().max(100).optional(),
+  affiliateLinks: z.string().max(3000).optional(),
 });
 
 app.get("/api/channels", (_req, res) => {
@@ -228,6 +235,13 @@ app.post("/api/videos/:id/script", async (req, res) => {
   res.json(publicVideo(db.updateVideo(video.id, { script, status: video.status === "idea" ? "scripted" : video.status })!));
 });
 
+app.post("/api/videos/:id/research", async (req, res) => {
+  requireAi();
+  const video = getVideo(req.params.id);
+  const result = await research(getChannel(video.channelId), video);
+  res.json(publicVideo(db.updateVideo(video.id, { research: { ...result, createdAt: new Date().toISOString() } })!));
+});
+
 app.post("/api/videos/:id/metadata", async (req, res) => {
   requireAi();
   const video = getVideo(req.params.id);
@@ -241,6 +255,31 @@ app.post("/api/videos/:id/metadata", async (req, res) => {
       })!,
     ),
   );
+});
+
+// ---------- Automatic video maker ----------
+
+app.get("/api/voices", async (_req, res) => {
+  if (!voiceConfigured()) return res.json([]);
+  res.json(await listVoices());
+});
+
+app.post("/api/videos/:id/render", (req, res) => {
+  requireAi();
+  if (!voiceConfigured()) throw new HttpError(400, "Add ELEVENLABS_API_KEY to .env to create voiceovers.");
+  if (!footageConfigured()) throw new HttpError(400, "Add PEXELS_API_KEY to .env to find stock footage.");
+  if (!ffmpegAvailable()) throw new HttpError(500, "FFmpeg is missing. Run npm install again.");
+  const video = getVideo(req.params.id);
+  if (video.youtubeVideoId) throw new HttpError(400, "This video is already on YouTube.");
+  if (!video.script.trim()) throw new HttpError(400, "Write the script first.");
+  startRender(video.id);
+  res.json(publicVideo(db.video(video.id)!));
+});
+
+app.get("/api/videos/:id/video", (req, res) => {
+  const video = getVideo(req.params.id);
+  if (!video.videoFile) throw new HttpError(404, "No video file.");
+  res.sendFile(video.videoFile.path);
 });
 
 // ---------- Files ----------
@@ -263,6 +302,7 @@ app.post("/api/videos/:id/files/:kind", upload.single("file"), (req, res) => {
   };
   if (!file) return reject("No file received.");
   if (video.youtubeVideoId) return reject("This video is already on YouTube.");
+  if (isRendering(video.id)) return reject("Wait until the video maker has finished.");
 
   const stored = { path: file.path, name: file.originalname, size: file.size, mimeType: file.mimetype };
   let patch: Partial<Video>;
@@ -295,6 +335,7 @@ app.post("/api/videos/:id/publish", (req, res) => {
   const video = getVideo(req.params.id);
   if (video.youtubeVideoId) throw new HttpError(400, "This video is already on YouTube.");
   if (uploading.has(video.id)) throw new HttpError(409, "This video is already uploading.");
+  if (isRendering(video.id)) throw new HttpError(409, "Wait until the video maker has finished.");
   if (!video.videoFile) throw new HttpError(400, "Upload the video file first.");
   if (!db.channel(video.channelId)?.youtube) throw new HttpError(400, "Connect this channel to YouTube first.");
 
@@ -347,6 +388,8 @@ if (PROD) {
   const vite = await createServer({ server: { middlewareMode: true }, appType: "spa" });
   app.use(vite.middlewares);
 }
+
+recoverInterruptedRenders();
 
 app.listen(PORT, () => {
   console.log(`YouTube Studio running at http://localhost:${PORT}`);
