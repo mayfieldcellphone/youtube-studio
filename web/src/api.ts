@@ -56,6 +56,16 @@ export interface Voice {
   previewUrl?: string;
 }
 
+export type SettingKey =
+  | "ANTHROPIC_API_KEY"
+  | "ELEVENLABS_API_KEY"
+  | "PEXELS_API_KEY"
+  | "GOOGLE_CLIENT_ID"
+  | "GOOGLE_CLIENT_SECRET"
+  | "APP_URL"
+  | "APP_PASSWORD";
+export type Settings = Record<SettingKey, { set: boolean; hint?: string; value?: string }>;
+
 export interface Status {
   loggedIn: boolean;
   passwordRequired: boolean;
@@ -83,6 +93,9 @@ export const api = {
   status: () => request<Status>("GET", "/api/status"),
   login: (password: string) => request("POST", "/api/login", { password }),
   logout: () => request("POST", "/api/logout"),
+
+  settings: () => request<Settings>("GET", "/api/settings"),
+  saveSettings: (values: Partial<Record<SettingKey, string>>) => request<Settings>("PUT", "/api/settings", values),
 
   channels: () => request<Channel[]>("GET", "/api/channels"),
   createChannel: (c: Partial<Channel>) => request<Channel>("POST", "/api/channels", c),

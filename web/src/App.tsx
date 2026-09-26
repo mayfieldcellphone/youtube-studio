@@ -13,6 +13,7 @@ interface AppState {
   status: Status;
   channels: Channel[];
   reloadChannels: () => Promise<void>;
+  reloadStatus: () => Promise<void>;
 }
 
 const AppContext = createContext<AppState | null>(null);
@@ -73,7 +74,7 @@ export default function App() {
   const activeChannel = section === "channels" ? id : undefined;
 
   return (
-    <AppContext.Provider value={{ status, channels, reloadChannels }}>
+    <AppContext.Provider value={{ status, channels, reloadChannels, reloadStatus: init }}>
       <div className="flex min-h-screen flex-col md:flex-row">
         <aside className="border-b border-zinc-200 bg-white md:sticky md:top-0 md:h-screen md:w-60 md:shrink-0 md:border-b-0 md:border-r dark:border-zinc-800 dark:bg-zinc-900">
           <div className="flex items-center gap-2 px-4 py-4 font-semibold">

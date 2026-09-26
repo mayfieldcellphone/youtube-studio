@@ -12,19 +12,28 @@ import { aiConfigured, generateIdeas, generateMetadata, generateScript, research
 import { footageConfigured, listVoices, voiceConfigured } from "./media";
 import { ffmpegAvailable, isRendering, recoverInterruptedRenders, startRender } from "./render";
 import { authUrl, completeAuth, redirectUri, syncChannel, uploadAndSchedule, youtubeConfigured } from "./youtube";
+import { describeSettings, loadSettings, saveSettings, SETTING_KEYS } from "./settings";
+
+loadSettings();
 
 const PORT = Number(process.env.PORT ?? 3000);
-const PROD = process.env.NODE_ENV === "production";
-const PASSWORD = process.env.APP_PASSWORD ?? "";
-const SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
+const PROD = process.env.NODE_ENV === "production" || process.argv.includes("--prod");
+// Only this computer can open the app unless HOST is set (e.g. HOST=0.0.0.0 on a server).
+const HOST = process.env.HOST ?? "127.0.0.1";
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
-app.use(cookieParser(SECRET));
+app.use(cookieParser(process.env.SESSION_SECRET));
 
 // ---------- Login ----------
 
-const cookieOpts = { signed: true, httpOnly: true, sameSite: "lax" as const, secure: PROD };
+// Secure cookies only work over https, so a local http install must not require them.
+const cookieOpts = () => ({
+  signed: true,
+  httpOnly: true,
+  sameSite: "lax" as const,
+  secure: (process.env.APP_URL ?? "").startsWith("https://"),
+});
 
 function sameText(a: string, b: string) {
   const ha = crypto.createHash("sha256").update(a).digest();
@@ -32,12 +41,16 @@ function sameText(a: string, b: string) {
   return crypto.timingSafeEqual(ha, hb);
 }
 
-const loggedIn = (req: Request) => !PASSWORD || req.signedCookies.session === "ok";
+const password = () => process.env.APP_PASSWORD ?? "";
+/** Tied to the password, so changing the password logs out every other browser. */
+const sessionToken = () => crypto.createHash("sha256").update(`session:${password()}`).digest("hex").slice(0, 32);
+const loggedIn = (req: Request) => !password() || req.signedCookies.session === sessionToken();
+const logIn = (res: Response) => res.cookie("session", sessionToken(), { ...cookieOpts(), maxAge: 30 * 24 * 3600 * 1000 });
 
 app.get("/api/status", (req, res) => {
   res.json({
     loggedIn: loggedIn(req),
-    passwordRequired: Boolean(PASSWORD),
+    passwordRequired: Boolean(password()),
     ai: aiConfigured(),
     youtube: youtubeConfigured(),
     voice: voiceConfigured(),
@@ -48,9 +61,9 @@ app.get("/api/status", (req, res) => {
 });
 
 app.post("/api/login", (req, res) => {
-  const password = String(req.body?.password ?? "");
-  if (!PASSWORD || sameText(password, PASSWORD)) {
-    res.cookie("session", "ok", { ...cookieOpts, maxAge: 30 * 24 * 3600 * 1000 });
+  const attempt = String(req.body?.password ?? "");
+  if (!password() || sameText(attempt, password())) {
+    logIn(res);
     return res.json({ ok: true });
   }
   res.status(401).json({ error: "Wrong password." });
@@ -89,6 +102,20 @@ function getVideo(id: string) {
 function requireAi() {
   if (!aiConfigured()) throw new HttpError(400, "Add ANTHROPIC_API_KEY to your .env file to use AI features.");
 }
+
+// ---------- Settings (keys entered on the Setup page) ----------
+
+app.get("/api/settings", (_req, res) => {
+  res.json(describeSettings());
+});
+
+app.put("/api/settings", (req, res) => {
+  const values = z.object(Object.fromEntries(SETTING_KEYS.map((k) => [k, z.string().max(500).optional()]))).parse(req.body);
+  saveSettings(values);
+  // Keep this browser logged in after setting or changing the password.
+  if (values.APP_PASSWORD !== undefined) logIn(res);
+  res.json(describeSettings());
+});
 
 // ---------- Channels ----------
 
@@ -148,7 +175,7 @@ app.get("/api/channels/:id/youtube/connect", (req, res) => {
   if (!youtubeConfigured()) throw new HttpError(400, "Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to .env first.");
   const channel = getChannel(req.params.id);
   const nonce = crypto.randomBytes(16).toString("hex");
-  res.cookie("oauth", `${nonce}:${channel.id}`, { ...cookieOpts, maxAge: 10 * 60 * 1000 });
+  res.cookie("oauth", `${nonce}:${channel.id}`, { ...cookieOpts(), maxAge: 10 * 60 * 1000 });
   res.redirect(authUrl(nonce));
 });
 
@@ -391,7 +418,7 @@ if (PROD) {
 
 recoverInterruptedRenders();
 
-app.listen(PORT, () => {
-  console.log(`YouTube Studio running at http://localhost:${PORT}`);
-  if (!PASSWORD) console.warn("APP_PASSWORD is not set: anyone who can reach this server can use it.");
+app.listen(PORT, HOST, () => {
+  console.log(`\n  YouTube Studio is running. Open http://localhost:${PORT} in your browser.\n  Keep this window open while you use the app.\n`);
+  if (!password() && HOST !== "127.0.0.1") console.warn("APP_PASSWORD is not set: anyone who can reach this server can use it.");
 });

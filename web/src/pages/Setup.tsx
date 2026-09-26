@@ -1,54 +1,85 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Check, Copy, X } from "lucide-react";
+import { api, type SettingKey, type Settings } from "../api";
 import { useApp } from "../App";
-import { PageHeader } from "../components/ui";
+import { ErrorBox, PageHeader, Spinner, useAction } from "../components/ui";
 
 export default function Setup() {
-  const { status } = useApp();
+  const { status, reloadStatus } = useApp();
+  const [settings, setSettings] = useState<Settings | null>(null);
   const [copied, setCopied] = useState(false);
+  const { busy, error, setError, run } = useAction();
+
+  useEffect(() => {
+    api.settings().then(setSettings).catch((e) => setError(e.message));
+  }, [setError]);
+
+  const save = (key: SettingKey, value: string) =>
+    run(key, async () => {
+      setSettings(await api.saveSettings({ [key]: value }));
+      await reloadStatus();
+    });
+
+  const field = (key: SettingKey, label: string, placeholder: string, secret = true) =>
+    settings && (
+      <KeyField
+        key={key}
+        label={label}
+        placeholder={placeholder}
+        secret={secret}
+        current={settings[key]}
+        busy={busy === key}
+        onSave={(v) => save(key, v)}
+      />
+    );
 
   return (
     <div className="max-w-3xl space-y-5">
-      <PageHeader title="Setup" subtitle="Connect the services the app uses. Add keys to the .env file on your server, then restart the app." />
+      <PageHeader
+        title="Setup"
+        subtitle="Connect the services the app uses. Follow the steps for each one, paste your key in the box and click Save. It works right away."
+      />
+      <ErrorBox error={error} onClose={() => setError(null)} />
+      {!settings && !error && <Spinner className="h-6 w-6" />}
 
-      <Section ok={status.ai} title="AI writing (Claude)">
+      <Section ok={status.ai} title="1. AI writing (Claude)">
         <ol className="list-decimal space-y-1.5 pl-5">
-          <li>Go to <Ext href="https://console.anthropic.com">console.anthropic.com</Ext>, sign up and add a payment method.</li>
-          <li>Open <b>API Keys</b> and create a key.</li>
-          <li>Put it in <code>.env</code> as <code>ANTHROPIC_API_KEY=...</code></li>
+          <li>Go to <Ext href="https://console.anthropic.com">console.anthropic.com</Ext>, sign up and add a payment method under <b>Billing</b>.</li>
+          <li>Open <b>API Keys</b>, click <b>Create Key</b> and copy it.</li>
         </ol>
+        {field("ANTHROPIC_API_KEY", "Anthropic API key", "sk-ant-api03-…")}
         <p className="mt-2 text-xs text-zinc-500">Used for ideas, web research, scripts, titles, descriptions and tags. You pay per use; a fully researched video typically costs well under $1.</p>
       </Section>
 
-      <Section ok={status.voice} title="AI voiceover (ElevenLabs)">
+      <Section ok={status.voice} title="2. AI voiceover (ElevenLabs)">
         <ol className="list-decimal space-y-1.5 pl-5">
           <li>Sign up at <Ext href="https://elevenlabs.io">elevenlabs.io</Ext>. The free plan is enough to test; the Starter plan (about $5/month) covers several videos a week.</li>
-          <li>Open your profile → <b>API Keys</b> and create a key with Text to Speech and Voices access.</li>
-          <li>Put it in <code>.env</code> as <code>ELEVENLABS_API_KEY=...</code></li>
+          <li>Click your profile → <b>API Keys</b> → <b>Create API Key</b> and copy it.</li>
         </ol>
-        <p className="mt-2 text-xs text-zinc-500">Then pick a narrator voice for each channel under Edit channel. Voices you add in ElevenLabs's Voice Library show up there too.</p>
+        {field("ELEVENLABS_API_KEY", "ElevenLabs API key", "sk_…")}
+        <p className="mt-2 text-xs text-zinc-500">Then pick a narrator voice for each channel under Edit channel.</p>
       </Section>
 
-      <Section ok={status.footage} title="Stock footage (Pexels)">
+      <Section ok={status.footage} title="3. Stock footage (Pexels, free)">
         <ol className="list-decimal space-y-1.5 pl-5">
-          <li>Sign up free at <Ext href="https://www.pexels.com/api/">pexels.com/api</Ext> and request an API key (instant).</li>
-          <li>Put it in <code>.env</code> as <code>PEXELS_API_KEY=...</code></li>
+          <li>Sign up free at <Ext href="https://www.pexels.com/api/">pexels.com/api</Ext>, click <b>Get Started</b>, and copy your API key.</li>
         </ol>
+        {field("PEXELS_API_KEY", "Pexels API key", "Paste your Pexels key")}
         <p className="mt-2 text-xs text-zinc-500">Pexels videos and photos are free to use on YouTube, including monetized videos.</p>
       </Section>
 
-      <Section ok={status.youtube} title="YouTube upload and stats (Google Cloud)">
+      <Section ok={status.youtube} title="4. YouTube upload and stats (Google Cloud)">
         <ol className="list-decimal space-y-1.5 pl-5">
           <li>Go to <Ext href="https://console.cloud.google.com/projectcreate">Google Cloud Console</Ext> and create a project (free).</li>
           <li>
             Open <Ext href="https://console.cloud.google.com/apis/library/youtube.googleapis.com">YouTube Data API v3</Ext> and click <b>Enable</b>.
           </li>
           <li>
-            Open <Ext href="https://console.cloud.google.com/auth/overview">Google Auth Platform</Ext>, set it up as <b>External</b>, and under{" "}
-            <b>Audience</b> add your Google email as a <b>test user</b>.
+            Open <Ext href="https://console.cloud.google.com/auth/overview">Google Auth Platform</Ext>, click <b>Get started</b>, choose <b>External</b>, and under{" "}
+            <b>Audience</b> add your own Google email as a <b>test user</b>.
           </li>
           <li>
-            Under <b>Clients</b>, create an OAuth client of type <b>Web application</b> and add this <b>Authorized redirect URI</b>:
+            Under <b>Clients</b>, click <b>Create client</b>, choose <b>Web application</b>, and add this under <b>Authorized redirect URIs</b>:
             <div className="mt-2 flex items-center gap-2">
               <code className="min-w-0 flex-1 truncate rounded bg-zinc-100 px-2 py-1.5 dark:bg-zinc-800">{status.redirectUri}</code>
               <button
@@ -62,9 +93,11 @@ export default function Setup() {
               </button>
             </div>
           </li>
-          <li>Copy the client ID and secret into <code>.env</code> as <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code>.</li>
-          <li>Restart the app, open a channel and click <b>Connect YouTube</b>.</li>
+          <li>Click <b>Create</b>. Google shows a <b>Client ID</b> and <b>Client secret</b>. Paste both below.</li>
+          <li>Then open a channel in this app and click <b>Connect YouTube</b>.</li>
         </ol>
+        {field("GOOGLE_CLIENT_ID", "Client ID", "123456789-abc.apps.googleusercontent.com", false)}
+        {field("GOOGLE_CLIENT_SECRET", "Client secret", "GOCSPX-…")}
         <div className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
           <b>Important:</b> until Google verifies your project (an “audit” you request in Google Cloud), videos uploaded through the API
           are locked as private and test-mode logins expire after 7 days. For your own channels you can request the audit, or
@@ -72,11 +105,20 @@ export default function Setup() {
         </div>
       </Section>
 
-      <Section ok={status.passwordRequired} title="Password protection">
+      <Section ok={status.passwordRequired} title="5. Login password (optional)" labels={["On", "Off"]}>
         <p>
-          Set <code>APP_PASSWORD</code> and a random <code>SESSION_SECRET</code> in <code>.env</code> before putting this app on the internet.
-          The app holds access to your YouTube channels.
+          On your own computer, only you can open the app, so a password is optional. Set one if other people use this computer,
+          and always before putting the app online.
         </p>
+        {field("APP_PASSWORD", "Password", "Choose a password")}
+      </Section>
+
+      <Section title="Advanced: app address">
+        <p>
+          Leave this empty while the app runs on your computer. Change it only when the app is online, for example{" "}
+          <code>https://studio.example.com</code>. It changes the YouTube redirect address above.
+        </p>
+        {field("APP_URL", "App address", "http://localhost:3000", false)}
       </Section>
 
       <Section title="Tools that pair well with this app">
@@ -91,7 +133,83 @@ export default function Setup() {
   );
 }
 
-function Section({ ok, title, children }: { ok?: boolean; title: string; children: ReactNode }) {
+function KeyField(props: {
+  label: string;
+  placeholder: string;
+  secret: boolean;
+  current: Settings[SettingKey];
+  busy: boolean;
+  onSave: (value: string) => Promise<unknown>;
+}) {
+  const [value, setValue] = useState("");
+  const [editing, setEditing] = useState(false);
+  const saved = props.current.set;
+  const showInput = !saved || editing;
+
+  const submit = async () => {
+    await props.onSave(value);
+    setValue("");
+    setEditing(false);
+  };
+
+  return (
+    <div className="mt-4 rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800/50">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <span className="font-medium">{props.label}</span>
+        {saved && (
+          <span className="flex items-center gap-1 text-xs text-green-700 dark:text-green-400">
+            <Check className="h-3.5 w-3.5" />
+            Saved {props.current.value ? `(${props.current.value})` : props.current.hint ? `(ends in ${props.current.hint})` : ""}
+          </span>
+        )}
+      </div>
+      {showInput ? (
+        <form
+          className="flex flex-wrap gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit();
+          }}
+        >
+          <input
+            className="min-w-0 flex-1"
+            type={props.secret ? "password" : "text"}
+            autoComplete="off"
+            spellCheck={false}
+            placeholder={props.placeholder}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+          />
+          <button className="btn-primary" disabled={props.busy || !value.trim()}>
+            {props.busy && <Spinner />} Save
+          </button>
+          {editing && (
+            <button type="button" className="btn-ghost" onClick={() => setEditing(false)}>
+              Cancel
+            </button>
+          )}
+        </form>
+      ) : (
+        <div className="flex gap-2">
+          <button className="btn-secondary" onClick={() => setEditing(true)}>
+            Change
+          </button>
+          <button
+            className="btn-ghost text-red-600"
+            disabled={props.busy}
+            onClick={() => {
+              if (confirm(`Remove the saved ${props.label}?`)) props.onSave("");
+            }}
+          >
+            Remove
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Section({ ok, title, labels = ["Key saved", "Not set up"], children }: { ok?: boolean; title: string; labels?: [string, string]; children: ReactNode }) {
   return (
     <section className="card text-sm">
       <h2 className="mb-3 flex items-center gap-2 text-base font-semibold">
@@ -101,7 +219,7 @@ function Section({ ok, title, children }: { ok?: boolean; title: string; childre
           <span className="flex h-5 w-5 items-center justify-center rounded-full bg-zinc-300 text-white dark:bg-zinc-700"><X className="h-3 w-3" /></span>
         )}
         {title}
-        {ok !== undefined && <span className={`text-xs font-normal ${ok ? "text-green-600" : "text-zinc-500"}`}>{ok ? "Connected" : "Not set up"}</span>}
+        {ok !== undefined && <span className={`text-xs font-normal ${ok ? "text-green-600" : "text-zinc-500"}`}>{ok ? labels[0] : labels[1]}</span>}
       </h2>
       {children}
     </section>

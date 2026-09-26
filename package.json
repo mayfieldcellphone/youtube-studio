@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "tsx watch --ignore web server/index.ts",
     "build": "vite build",
-    "start": "NODE_ENV=production tsx server/index.ts",
+    "start": "tsx server/index.ts --prod",
     "lint": "tsc"
   },
   "repository": {

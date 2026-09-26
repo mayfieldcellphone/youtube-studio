@@ -16,28 +16,34 @@ Ready-made channel presets: **AI Tools Explained**, **Money Moves** (finance and
 
 A kanban board per channel tracks each video from idea to scripted, ready, scheduled and published. A calendar shows every channel's schedule, and each channel's posting days are used to suggest the next free slot.
 
-## Run it
+## Run it (easy way)
 
-Requires Node.js 22+.
+1. Install **Node.js 22 or newer** (the "LTS" download from [nodejs.org](https://nodejs.org)). This is a one-time step.
+2. Download this repo (green **Code** button → **Download ZIP**) and unzip it.
+3. Double-click the start file:
+   - **Windows:** `Start YouTube Studio (Windows).bat`
+   - **Mac:** `Start YouTube Studio (Mac).command`. The first time, right-click it → **Open** → **Open**, because macOS blocks downloaded scripts until you allow them.
+4. The first start takes a few minutes. Your browser then opens the app at http://localhost:3000.
+5. Go to **Setup**, paste each key in its box and click **Save**. It works right away, with no restart and no files to edit.
+
+Keep the black window open while you use the app. Close it to stop the app.
+
+## Run it (developers)
 
 ```bash
 npm install
-cp .env.example .env   # then fill in the keys (see below)
-npm run dev            # http://localhost:3000
+npm run dev            # http://localhost:3000, reloads on code changes
+# or
+npm run build && npm start
 ```
 
-Production:
+Keys saved on the Setup page are stored in `data/settings.json` and take priority over `.env` (see `.env.example`). All data (channels, videos, uploaded files, settings) lives in `./data`. Set `DATA_DIR` to change it, and back that folder up.
 
-```bash
-npm run build
-npm start
-```
-
-Data (channels, videos, uploaded files) is stored in `./data`. Set `DATA_DIR` to change it, and back that folder up.
+The app only accepts connections from the same computer. To run it on a server, set `HOST=0.0.0.0`, set a password, and set `APP_URL` to its public https address.
 
 ## Keys
 
-The in-app **Setup** page has the same steps, plus a copy button for the redirect URI.
+The in-app **Setup** page has the same steps, a box for each key, and a copy button for the redirect URI.
 
 ### Claude (AI writing)
 
@@ -69,7 +75,7 @@ FFmpeg comes with `npm install` (`ffmpeg-static`), so there's nothing extra to i
 
 ### Security
 
-Set `APP_PASSWORD` and a random `SESSION_SECRET` before putting the app on the internet. The app holds upload access to your YouTube channels.
+On your own computer only you can open the app, so a password is optional (Setup → Login password). Always set one before putting the app on the internet, because the app holds upload access to your YouTube channels.
 
 ## Limits
 

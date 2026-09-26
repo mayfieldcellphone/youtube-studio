@@ -4,7 +4,15 @@ import type { Channel, Research, Video } from "./db";
 const MODEL = "claude-opus-5";
 
 let client: Anthropic | undefined;
-const anthropic = () => (client ??= new Anthropic());
+let clientKey: string | undefined;
+/** Recreated when the key changes on the Setup page. */
+const anthropic = () => {
+  if (!client || clientKey !== process.env.ANTHROPIC_API_KEY) {
+    clientKey = process.env.ANTHROPIC_API_KEY;
+    client = new Anthropic({ apiKey: clientKey });
+  }
+  return client;
+};
 
 export const aiConfigured = () => Boolean(process.env.ANTHROPIC_API_KEY);
 
