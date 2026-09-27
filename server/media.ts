@@ -15,13 +15,56 @@ async function eleven(path: string, init?: RequestInit) {
     ...init,
     headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY ?? "", "Content-Type": "application/json", ...init?.headers },
   });
-  if (!res.ok) {
-    const body = await res.text();
-    if (res.status === 401) throw new Error("Your ElevenLabs API key is invalid. Check ELEVENLABS_API_KEY.");
-    if (res.status === 402 || body.includes("quota")) throw new Error("ElevenLabs: out of credits for this month. Upgrade your plan or wait for the reset.");
-    throw new Error(`ElevenLabs error ${res.status}: ${body.slice(0, 200)}`);
-  }
+  if (!res.ok) throw new Error(elevenError(res.status, await res.text()));
   return res.json();
+}
+
+/**
+ * ElevenLabs answers 401 for several different problems (used-up quota, blocked free
+ * account, missing key permission, wrong key), so the reason has to be read from the body.
+ */
+function elevenError(status: number, body: string) {
+  let reason = "";
+  let message = "";
+  try {
+    const detail = JSON.parse(body).detail;
+    reason = String(detail?.status ?? detail?.code ?? "");
+    message = String(detail?.message ?? (typeof detail === "string" ? detail : ""));
+  } catch {
+    message = body.slice(0, 200);
+  }
+  const text = `${reason} ${message}`.toLowerCase();
+
+  if (text.includes("quota") || text.includes("credits") || status === 402) {
+    return "ElevenLabs: you've used up this month's voice characters. Upgrade your ElevenLabs plan (Starter is about $5/month) or wait for the monthly reset. Your key is fine.";
+  }
+  if (text.includes("unusual_activity") || text.includes("unusual activity")) {
+    return "ElevenLabs blocked free-plan use from this connection (\"unusual activity\"). This happens with VPNs or several free accounts. Turn off any VPN, or upgrade to a paid ElevenLabs plan. Your key is fine.";
+  }
+  if (text.includes("permission")) {
+    return `ElevenLabs: your API key is missing a permission. In ElevenLabs → API Keys, edit the key and allow Text to Speech, Voices (read) and User (read). (${message})`;
+  }
+  if (text.includes("invalid_api_key") || text.includes("invalid api key") || (status === 401 && !reason)) {
+    return "Your ElevenLabs API key was rejected. Create a new key in ElevenLabs → API Keys and paste it on the Setup page.";
+  }
+  if (status === 429) {
+    return "ElevenLabs is busy or you've hit its request limit. Wait a minute and try again.";
+  }
+  return `ElevenLabs error ${status}${reason ? ` (${reason})` : ""}: ${message || body.slice(0, 200)}`;
+}
+
+/** Characters left this month, or null if the key can't read the subscription. */
+export async function voiceCharactersLeft(): Promise<{ used: number; limit: number; resetsAt?: string } | null> {
+  try {
+    const sub = await eleven("/v1/user/subscription");
+    return {
+      used: Number(sub.character_count ?? 0),
+      limit: Number(sub.character_limit ?? 0),
+      resetsAt: sub.next_character_count_reset_unix ? new Date(sub.next_character_count_reset_unix * 1000).toISOString() : undefined,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export interface Voice {

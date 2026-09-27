@@ -126,6 +126,7 @@ export const api = {
   research: (id: string) => request<Video>("POST", `/api/videos/${id}/research`),
   render: (id: string) => request<Video>("POST", `/api/videos/${id}/render`),
   voices: () => request<Voice[]>("GET", "/api/voices"),
+  voiceUsage: () => request<{ used: number; limit: number; resetsAt?: string } | null>("GET", "/api/voice/usage"),
   videoUrl: (v: Video) => `/api/videos/${v.id}/video?t=${encodeURIComponent(v.updatedAt)}`,
   generateScript: (id: string) => request<Video>("POST", `/api/videos/${id}/script`),
   generateMetadata: (id: string) => request<Video>("POST", `/api/videos/${id}/metadata`),

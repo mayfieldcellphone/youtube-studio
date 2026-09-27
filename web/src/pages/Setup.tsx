@@ -8,6 +8,11 @@ export default function Setup() {
   const { status, reloadStatus } = useApp();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [copied, setCopied] = useState(false);
+  const [voiceUsage, setVoiceUsage] = useState<{ used: number; limit: number; resetsAt?: string } | null>(null);
+
+  useEffect(() => {
+    if (status.voice) api.voiceUsage().then(setVoiceUsage).catch(() => setVoiceUsage(null));
+  }, [status.voice]);
   const { busy, error, setError, run } = useAction();
 
   useEffect(() => {
@@ -54,9 +59,28 @@ export default function Setup() {
       <Section ok={status.voice} title="2. AI voiceover (ElevenLabs)">
         <ol className="list-decimal space-y-1.5 pl-5">
           <li>Sign up at <Ext href="https://elevenlabs.io">elevenlabs.io</Ext>. The free plan is enough to test; the Starter plan (about $5/month) covers several videos a week.</li>
-          <li>Click your profile → <b>API Keys</b> → <b>Create API Key</b> and copy it.</li>
+          <li>Click your profile → <b>API Keys</b> → <b>Create API Key</b>. Allow <b>Text to Speech</b>, <b>Voices</b> (read) and <b>User</b> (read), then copy it.</li>
         </ol>
         {field("ELEVENLABS_API_KEY", "ElevenLabs API key", "sk_…")}
+        {voiceUsage && voiceUsage.limit > 0 && (
+          <div className="mt-3">
+            <div className="mb-1 flex justify-between text-xs">
+              <span>
+                Voice characters this month: {voiceUsage.used.toLocaleString()} / {voiceUsage.limit.toLocaleString()}
+              </span>
+              {voiceUsage.resetsAt && <span className="text-zinc-500">Resets {new Date(voiceUsage.resetsAt).toLocaleDateString()}</span>}
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+              <div
+                className={`h-full ${voiceUsage.used / voiceUsage.limit > 0.85 ? "bg-red-600" : "bg-green-600"}`}
+                style={{ width: `${Math.min(100, (100 * voiceUsage.used) / voiceUsage.limit)}%` }}
+              />
+            </div>
+            <p className="mt-1 text-xs text-zinc-500">
+              A Short uses about 800 characters; a 10-minute video about 9,000. The free plan has 10,000 a month.
+            </p>
+          </div>
+        )}
         <p className="mt-2 text-xs text-zinc-500">Then pick a narrator voice for each channel under Edit channel.</p>
       </Section>
 

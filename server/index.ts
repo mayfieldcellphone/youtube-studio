@@ -9,7 +9,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { db, publicChannel, publicVideo, UPLOAD_DIR, type Video } from "./db";
 import { aiConfigured, generateIdeas, generateMetadata, generateScript, research } from "./ai";
-import { footageConfigured, listVoices, voiceConfigured } from "./media";
+import { footageConfigured, listVoices, voiceCharactersLeft, voiceConfigured } from "./media";
 import { ffmpegAvailable, isRendering, recoverInterruptedRenders, startRender } from "./render";
 import { authUrl, completeAuth, redirectUri, syncChannel, uploadAndSchedule, youtubeConfigured } from "./youtube";
 import { describeSettings, loadSettings, saveSettings, SETTING_KEYS } from "./settings";
@@ -292,7 +292,11 @@ app.get("/api/voices", async (_req, res) => {
   res.json(await listVoices());
 });
 
-app.post("/api/videos/:id/render", (req, res) => {
+app.get("/api/voice/usage", async (_req, res) => {
+  res.json(voiceConfigured() ? await voiceCharactersLeft() : null);
+});
+
+app.post("/api/videos/:id/render", async (req, res) => {
   requireAi();
   if (!voiceConfigured()) throw new HttpError(400, "Add ELEVENLABS_API_KEY to .env to create voiceovers.");
   if (!footageConfigured()) throw new HttpError(400, "Add PEXELS_API_KEY to .env to find stock footage.");
@@ -300,6 +304,18 @@ app.post("/api/videos/:id/render", (req, res) => {
   const video = getVideo(req.params.id);
   if (video.youtubeVideoId) throw new HttpError(400, "This video is already on YouTube.");
   if (!video.script.trim()) throw new HttpError(400, "Write the script first.");
+
+  // Catch a used-up voice quota now, before spending AI calls on a video that can't finish.
+  const needed = video.script.replace(/\[[^\]]*\]/g, "").replace(/\s+/g, " ").trim().length;
+  const usage = await voiceCharactersLeft();
+  if (usage && usage.limit > 0 && usage.limit - usage.used < needed) {
+    const left = Math.max(0, usage.limit - usage.used);
+    const reset = usage.resetsAt ? ` It resets on ${new Date(usage.resetsAt).toDateString()}.` : "";
+    throw new HttpError(
+      400,
+      `Not enough ElevenLabs voice characters: this script needs about ${needed.toLocaleString()}, you have ${left.toLocaleString()} left this month.${reset} Upgrade your ElevenLabs plan or use a shorter script.`,
+    );
+  }
   startRender(video.id);
   res.json(publicVideo(db.video(video.id)!));
 });
