@@ -147,6 +147,8 @@ const channelInput = z.object({
   voiceId: z.string().max(100).optional(),
   voiceStyle: z.string().max(300).optional(),
   look: z.enum(["cinematic", "clean", "warm"]).optional(),
+  aiFootage: z.enum(["off", "hook", "key", "all"]).optional(),
+  aiQuality: z.enum(["fast", "best"]).optional(),
   affiliateLinks: z.string().max(3000).optional(),
 });
 
@@ -335,7 +337,11 @@ app.post("/api/videos/:id/render", async (req, res) => {
   if (video.youtubeVideoId) throw new HttpError(400, "This video is already on YouTube.");
   notAutomated(video);
   if (!video.script.trim()) throw new HttpError(400, "Write the script first.");
-  const voice = voiceFor(getChannel(video.channelId));
+  const renderChannel = getChannel(video.channelId);
+  if ((renderChannel.aiFootage ?? "off") !== "off" && !geminiConfigured()) {
+    throw new HttpError(400, "AI footage (Veo) uses your Gemini key: add it on the Setup page (box 2a), or set AI footage to Off under Edit channel.");
+  }
+  const voice = voiceFor(renderChannel);
   if (!engineReady(voice.engine)) {
     throw new HttpError(400, `Add your ${voice.engine === "gemini" ? "Gemini" : "ElevenLabs"} key on the Setup page, or pick another voice engine under Edit channel.`);
   }
@@ -411,7 +417,7 @@ app.post("/api/videos/:id/files/:kind", upload.single("file"), (req, res) => {
   let patch: Partial<Video>;
   if (kind === "video") {
     if (!file.mimetype.startsWith("video/")) return reject("Please choose a video file (MP4 or MOV).");
-    patch = { videoFile: stored, status: ["idea", "scripted"].includes(video.status) ? "ready" : video.status };
+    patch = { videoFile: stored, aiFootageUsed: false, status: ["idea", "scripted"].includes(video.status) ? "ready" : video.status };
     if (video.videoFile) fs.rm(video.videoFile.path, { force: true }, () => {});
   } else if (kind === "thumbnail") {
     if (!["image/jpeg", "image/png"].includes(file.mimetype)) return reject("Thumbnails must be JPG or PNG.");

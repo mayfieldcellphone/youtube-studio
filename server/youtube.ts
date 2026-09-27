@@ -95,9 +95,12 @@ export async function uploadAndSchedule(video: Video) {
         tags: video.tags,
         categoryId: channel.categoryId || "22",
       },
-      status: publishAt
-        ? { privacyStatus: "private", publishAt, selfDeclaredMadeForKids: false }
-        : { privacyStatus: "public", selfDeclaredMadeForKids: false },
+      status: {
+        ...(publishAt ? { privacyStatus: "private", publishAt } : { privacyStatus: "public" }),
+        selfDeclaredMadeForKids: false,
+        // YouTube requires disclosing realistic AI-generated footage.
+        ...(video.aiFootageUsed && { containsSyntheticMedia: true }),
+      },
     },
     media: { body: fs.createReadStream(video.videoFile.path) },
   });

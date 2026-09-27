@@ -7,6 +7,7 @@ import { DATA_DIR, db, UPLOAD_DIR, type VideoLook } from "./db";
 import { planScenes } from "./ai";
 import { download, findFootage, type Footage, type Word } from "./media";
 import { synthesizeScenes, voiceFor } from "./voices";
+import { CLIP_SECONDS, makeClips } from "./veo";
 
 const FONT_DIR = path.resolve("assets/fonts");
 const FPS = 30;
@@ -81,24 +82,63 @@ async function render(videoId: string) {
     const voices = narrated.map((v) => ({ ...v, duration: Math.max(v.duration, 0.5) + GAP }));
 
     // 2. Plan shots: each scene's time is split between its shots. Frame counts come from
-    //    cumulative times so the picture never drifts from the narration.
-    const shots: { query: string; fallback: string; frames: number }[] = [];
+    //    cumulative times so the picture never drifts from the narration. Scenes chosen for
+    //    AI footage open with one Veo clip (up to 8 s); any remaining time uses stock shots.
+    const aiScenes = pickAiScenes(channel.aiFootage ?? "off", scenes);
+    const shots: { query: string; fallback: string; frames: number; aiPrompt?: string }[] = [];
     let elapsed = 0;
+    const addShot = (seconds: number, shot: Omit<(typeof shots)[number], "frames">) => {
+      const frames = Math.round((elapsed + seconds) * FPS) - Math.round(elapsed * FPS);
+      elapsed += seconds;
+      shots.push({ ...shot, frames: Math.max(frames, 1) });
+    };
     for (const [i, scene] of scenes.entries()) {
-      const each = voices[i].duration / scene.shots.length;
-      for (const query of scene.shots) {
-        const frames = Math.round((elapsed + each) * FPS) - Math.round(elapsed * FPS);
-        elapsed += each;
-        shots.push({ query, fallback: scene.fallbackQuery, frames: Math.max(frames, 1) });
+      const duration = voices[i].duration;
+      let queries = scene.shots;
+      let remaining = duration;
+      if (aiScenes.has(i)) {
+        // A clip slightly shorter than the scene just loops for the last moment.
+        const aiSeconds = duration - CLIP_SECONDS > 1.5 ? CLIP_SECONDS : duration;
+        addShot(aiSeconds, { query: scene.shots[0], fallback: scene.fallbackQuery, aiPrompt: scene.aiPrompt });
+        remaining -= aiSeconds;
+        queries = scene.shots.slice(1).length ? scene.shots.slice(1) : scene.shots.slice(0, 1);
       }
+      if (remaining <= 0.01) continue;
+      for (const query of queries) addShot(remaining / queries.length, { query, fallback: scene.fallbackQuery });
     }
     const total = elapsed;
 
-    // 3. Stock footage for each shot, never reusing a clip within the video.
+    // 3a. AI shots from Veo; any that fail fall back to stock footage below.
+    const notes: string[] = [];
+    const aiFiles = new Map<number, string>();
+    const aiShots = shots.flatMap((s, i) => (s.aiPrompt ? [i] : []));
+    if (aiShots.length) {
+      const label = (done: number) => `Creating AI shots with Veo (${done}/${aiShots.length}), about 1-3 minutes each`;
+      stage(label(0), 35);
+      const requests = aiShots.map((i) => ({ prompt: shots[i].aiPrompt!, outFile: path.join(work, `ai-${i}.mp4`) }));
+      const results = await makeClips(requests, channel.aiQuality ?? "fast", portrait, (done) =>
+        stage(label(done), 35 + (12 * done) / aiShots.length),
+      );
+      const failures = new Map<string, number>();
+      results.forEach((result, k) => {
+        if (result === true) aiFiles.set(aiShots[k], requests[k].outFile);
+        else failures.set(result, (failures.get(result) ?? 0) + 1);
+      });
+      for (const [reason, count] of failures) {
+        notes.push(`${count} AI shot${count > 1 ? "s" : ""} used stock footage instead. ${reason}`);
+      }
+    }
+
+    // 3b. Stock footage for every other shot, never reusing a clip within the video.
     const used = new Set<string>();
     const visuals: ((Footage & { file: string }) | null)[] = [];
     for (const [i, shot] of shots.entries()) {
-      stage(`Finding footage (${i + 1}/${shots.length})`, 35 + (20 * i) / shots.length);
+      const aiFile = aiFiles.get(i);
+      if (aiFile) {
+        visuals.push({ id: `ai-${i}`, kind: "video", url: "", file: aiFile });
+        continue;
+      }
+      stage(`Finding footage (${i + 1}/${shots.length})`, 47 + (8 * i) / shots.length);
       const found = (await findFootage(shot.query, portrait, used)) ?? (await findFootage(shot.fallback, portrait, used));
       if (!found) {
         visuals.push(null);
@@ -179,12 +219,25 @@ async function render(videoId: string) {
     db.updateVideo(videoId, {
       videoFile: { path: output, name: `${slug(video.title)}.mp4`, size, mimeType: "video/mp4" },
       status: ["idea", "scripted"].includes(video.status) ? "ready" : video.status,
-      render: { ...video.render!, stage: "Done", progress: 100, finishedAt: new Date().toISOString() },
+      aiFootageUsed: aiFiles.size > 0,
+      render: { ...video.render!, stage: "Done", progress: 100, notes, finishedAt: new Date().toISOString() },
     });
     if (previous) fs.rm(previous.path, { force: true }, () => {});
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
   }
+}
+
+/** Up to this many Veo clips in one video, to keep costs predictable. */
+export const MAX_AI_SHOTS = 12;
+
+/** Scene numbers that get an AI shot: the opening hook, the key moments, or all. */
+export function pickAiScenes(mode: "off" | "hook" | "key" | "all", scenes: { keyMoment?: boolean }[]) {
+  if (mode === "off" || !scenes.length) return new Set<number>();
+  if (mode === "all") return new Set(scenes.map((_, i) => i).slice(0, MAX_AI_SHOTS));
+  const picked = [0];
+  if (mode === "key") picked.push(...scenes.flatMap((s, i) => (s.keyMoment && i > 0 ? [i] : [])).slice(0, 2));
+  return new Set(picked);
 }
 
 /** Color grades per channel look. Applied to every shot. */

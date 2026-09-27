@@ -59,6 +59,10 @@ Create a key at [console.anthropic.com](https://console.anthropic.com) and set `
 
 ElevenLabs returns exact word timings for captions. For Kokoro and Gemini the app estimates them from the text, which stays close because scenes are 1-2 sentences.
 
+### AI footage with Google Veo (optional, Edit channel → AI footage)
+
+Veo is the video model behind Google Flow. The app uses it through the same Gemini key (billing required) to make custom 8-second shots for the opening hook, the key moments, or every scene; Pexels stock footage fills the rest. The app asks Google which Veo models the key can use and picks the newest (Fast or Best quality). Shots Veo refuses or fails fall back to stock footage with a note. Videos containing Veo footage are marked as altered/synthetic content when uploaded, as YouTube requires. The cost estimate on the video page uses rough list prices; Google's pricing page is authoritative.
+
 ### Pexels (stock footage, free)
 
 Get a key at [pexels.com/api](https://www.pexels.com/api/) and set `PEXELS_API_KEY`.

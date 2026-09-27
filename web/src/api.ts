@@ -18,6 +18,8 @@ export interface Channel {
   voiceStyle?: string;
   affiliateLinks?: string;
   look?: "cinematic" | "clean" | "warm";
+  aiFootage?: "off" | "hook" | "key" | "all";
+  aiQuality?: "fast" | "best";
   musicFile?: FileInfo;
   youtube?: { channelId: string; title: string; thumbnail?: string; connectedAt: string };
   stats?: { subscribers: number; views: number; videos: number; updatedAt: string };
@@ -41,7 +43,8 @@ export interface Video {
   angle: string;
   script: string;
   research?: { notes: string; sources: { title: string; url: string }[]; createdAt: string };
-  render?: { stage: string; progress: number; error?: string; startedAt: string; finishedAt?: string };
+  render?: { stage: string; progress: number; error?: string; notes?: string[]; startedAt: string; finishedAt?: string };
+  aiFootageUsed?: boolean;
   pipeline?: { stopAfter: StopAfter; step: string; result?: string; error?: string; startedAt: string; finishedAt?: string };
   titleOptions: string[];
   description: string;
@@ -177,6 +180,18 @@ export const STATUS_LABELS: Record<VideoStatus, string> = {
   published: "Published",
   failed: "Upload failed",
 };
+
+/** Rough Veo prices per second, for estimates only (Google's pricing page is authoritative). */
+export const VEO_PRICE_PER_SECOND = { fast: 0.15, best: 0.4 } as const;
+
+/** Upper estimate of AI shots and cost for one video on this channel. */
+export function aiFootageEstimate(channel: Channel, format: VideoFormat) {
+  const mode = channel.aiFootage ?? "off";
+  if (mode === "off") return null;
+  const shots = mode === "hook" ? 1 : mode === "key" ? 3 : format === "short" ? 7 : 12;
+  const cost = shots * 8 * VEO_PRICE_PER_SECOND[channel.aiQuality ?? "fast"];
+  return { shots, cost };
+}
 
 export const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 

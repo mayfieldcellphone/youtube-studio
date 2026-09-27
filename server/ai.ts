@@ -275,6 +275,10 @@ Write the YouTube upload details for this video:
 
 export interface Scene {
   narration: string;
+  /** A cinematic shot description for an AI video model (Veo). */
+  aiPrompt: string;
+  /** The biggest reveal or emotional peak of the video. */
+  keyMoment: boolean;
   /** One stock-footage search per shot; the scene's time is split between them. */
   shots: string[];
   fallbackQuery: string;
@@ -294,7 +298,9 @@ Turn this script into scenes for an automatically edited ${video.format === "sho
   Each shot is 2-5 English words to search a stock video library (Pexels). Describe something filmable, concrete and atmospheric ("candle flickering in dark room", "fog rolling over pine forest", "hands turning old book pages"), not abstract ideas or names of real people.
   Match the mood and era of the story: for historical stories prefer old, timeless or vintage-looking subjects (ruins, candles, old documents, stone, fog, black and white) and avoid modern cars, phones or people in modern clothes.
   Vary the shots: mix wide establishing shots, close-up details and moody textures. Don't repeat the same subject.
-- "fallbackQuery": a broad 1-2 word search in case a shot finds nothing ("forest", "old paper").`;
+- "fallbackQuery": a broad 1-2 word search in case a shot finds nothing ("forest", "old paper").
+- "aiPrompt": one vivid shot description for an AI video generator, in English, 30-60 words: the subject, setting and era, lighting, camera movement and mood, like a film director's shot note ("Slow dolly toward a stone lighthouse on a storm-lashed Scottish cliff, 1900, grey dawn light, waves exploding below, cinematic, desaturated, tense"). It must match the narration. No text, captions or logos; no real, named people (describe anonymous figures instead); no gore.
+- "keyMoment": true for the 1-2 scenes that hold the biggest reveal or emotional peak; false for all others.`;
 
   const result = await generate<{ scenes: Scene[] }>(prompt, obj({
     scenes: {
@@ -303,6 +309,8 @@ Turn this script into scenes for an automatically edited ${video.format === "sho
         narration: str("Spoken words for this scene"),
         shots: { type: "array", items: str("Stock footage search for one shot") },
         fallbackQuery: str("Broader stock footage search"),
+        aiPrompt: str("Cinematic shot description for an AI video model"),
+        keyMoment: { type: "boolean", description: "True for the biggest reveal or emotional peak" },
       }),
     },
   }));

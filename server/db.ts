@@ -42,6 +42,10 @@ export interface Channel {
   affiliateLinks?: string;
   /** Color grade for automatically made videos */
   look?: VideoLook;
+  /** Which shots are made with Google Veo AI video instead of stock footage */
+  aiFootage?: "off" | "hook" | "key" | "all";
+  /** Veo model tier: fast is cheaper, best looks better */
+  aiQuality?: "fast" | "best";
   /** Background music mixed quietly under the narration */
   musicFile?: StoredFile;
   youtube?: YouTubeLink;
@@ -67,6 +71,8 @@ export interface RenderJob {
   /** 0-100 */
   progress: number;
   error?: string;
+  /** Things that didn't go as planned but didn't stop the video (e.g. an AI shot fell back to stock). */
+  notes?: string[];
   startedAt: string;
   finishedAt?: string;
 }
@@ -95,6 +101,8 @@ export interface Video {
   script: string;
   research?: Research;
   render?: RenderJob;
+  /** The last made video contains AI-generated footage (disclosed to YouTube on upload). */
+  aiFootageUsed?: boolean;
   pipeline?: PipelineJob;
   titleOptions: string[];
   description: string;

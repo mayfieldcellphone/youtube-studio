@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, BookOpen, CalendarClock, Check, ExternalLink, Film, Image, Sparkles, Trash2, Upload, Wand2 } from "lucide-react";
 import {
+  aiFootageEstimate,
   api,
   compact,
   fileSize,
@@ -328,6 +329,13 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
                     · <a className="underline" href={`#/channels/${channel.id}/edit`}>change</a>
                   </p>
                 )}
+                {channel && aiFootageEstimate(channel, video.format) && (
+                  <p className="mt-1 text-xs text-zinc-500">
+                    AI footage (Veo): up to <b>{aiFootageEstimate(channel, video.format)!.shots}</b> shot
+                    {aiFootageEstimate(channel, video.format)!.shots > 1 ? "s" : ""}, roughly{" "}
+                    <b>${aiFootageEstimate(channel, video.format)!.cost.toFixed(2)}</b> at most. Adds a few minutes.
+                  </p>
+                )}
               </div>
               {!renderRunning && (
                 <button
@@ -369,6 +377,13 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
           </div>
         )}
 
+        {!renderRunning && video.render?.notes && video.render.notes.length > 0 && (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+            {video.render.notes.map((n) => (
+              <p key={n}>{n}</p>
+            ))}
+          </div>
+        )}
         {video.videoFile && !renderRunning && (
           <div className="mb-5">
             <p className="mb-2 text-sm font-medium">Preview: watch it all the way through before you schedule it</p>

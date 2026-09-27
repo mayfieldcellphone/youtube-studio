@@ -222,6 +222,30 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
             <option value="warm">Warm: friendly and golden (money, lifestyle)</option>
           </select>
         </Field>
+        <Field
+          label="AI footage (Google Veo)"
+          hint="Custom AI-made shots for the moments that matter, instead of stock footage. Uses your Gemini key with billing. If an AI shot fails, stock footage is used for it."
+        >
+          <div className="flex flex-wrap gap-2">
+            <select className="min-w-0 flex-1" value={form.aiFootage ?? "off"} onChange={(e) => set("aiFootage", e.target.value as Channel["aiFootage"])}>
+              <option value="off">Off: stock footage only (free)</option>
+              <option value="hook">Hook only: AI for the opening shot (about $1-3 per video)</option>
+              <option value="key">Hook + key moments: up to 3 AI shots (about $4-10 per video)</option>
+              <option value="all">Everything: AI for every scene (about $8-40 per video)</option>
+            </select>
+            {(form.aiFootage ?? "off") !== "off" && (
+              <select className="w-auto" value={form.aiQuality ?? "fast"} onChange={(e) => set("aiQuality", e.target.value as Channel["aiQuality"])}>
+                <option value="fast">Fast (cheaper)</option>
+                <option value="best">Best quality</option>
+              </select>
+            )}
+          </div>
+          {(form.aiFootage ?? "off") !== "off" && !status.gemini && (
+            <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+              Add your Gemini key on the <a className="underline" href="#/setup">Setup</a> page first.
+            </p>
+          )}
+        </Field>
         {existing && <MusicField channel={existing} onChange={reloadChannels} />}
         <Field label="Affiliate links (optional)" hint="One per line, e.g. “Notion AI: https://…”. The AI adds relevant ones to video descriptions.">
           <textarea rows={3} value={form.affiliateLinks ?? ""} onChange={(e) => set("affiliateLinks", e.target.value)} />
