@@ -88,11 +88,18 @@ export interface Status {
 
 async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
   const isForm = body instanceof FormData;
-  const res = await fetch(url, {
-    method,
-    headers: body && !isForm ? { "Content-Type": "application/json" } : undefined,
-    body: isForm ? body : body === undefined ? undefined : JSON.stringify(body),
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: body && !isForm ? { "Content-Type": "application/json" } : undefined,
+      body: isForm ? body : body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    throw new Error(
+      "The app isn't responding. Check that the black YouTube Studio window is still open. If it closed, double-click the Start file again, then reload this page.",
+    );
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error ?? `Request failed (${res.status})`);
   return data as T;

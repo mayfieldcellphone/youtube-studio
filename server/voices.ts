@@ -26,10 +26,10 @@ export interface VoiceOption {
 
 export const geminiConfigured = () => Boolean(process.env.GEMINI_API_KEY);
 
-/** The engine a channel uses: its own choice, else the first one that's set up. */
+/** The engine a channel uses: its own choice, else Gemini, ElevenLabs or Kokoro, whichever is set up first. */
 export function voiceFor(channel: Channel): VoiceChoice {
   const engine: VoiceEngine =
-    channel.voiceEngine ?? (elevenConfigured() ? "elevenlabs" : geminiConfigured() ? "gemini" : "kokoro");
+    channel.voiceEngine ?? (geminiConfigured() ? "gemini" : elevenConfigured() ? "elevenlabs" : "kokoro");
   return { engine, voiceId: channel.voiceId || undefined, style: channel.voiceStyle || undefined };
 }
 

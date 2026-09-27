@@ -60,7 +60,7 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   // The engine used when none is chosen: the first one that's set up.
-  const defaultEngine: VoiceEngine = status.voice ? "elevenlabs" : status.gemini ? "gemini" : "kokoro";
+  const defaultEngine: VoiceEngine = status.gemini ? "gemini" : status.voice ? "elevenlabs" : "kokoro";
   const engine = form.voiceEngine ?? defaultEngine;
   const engineReady = engine === "kokoro" || (engine === "gemini" ? status.gemini : status.voice);
 

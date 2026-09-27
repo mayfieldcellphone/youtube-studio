@@ -36,7 +36,7 @@ function elevenError(status: number, body: string) {
   const text = `${reason} ${message}`.toLowerCase();
 
   if (text.includes("quota") || text.includes("credits") || status === 402) {
-    return "ElevenLabs: you've used up this month's voice characters. Upgrade your ElevenLabs plan (Starter is about $5/month) or wait for the monthly reset. Your key is fine.";
+    return "ElevenLabs: you've used up this month's voice characters. Switch this channel's Voice engine to Gemini or Kokoro (free) under Edit channel, upgrade your ElevenLabs plan (Starter is about $5/month), or wait for the monthly reset. Your key is fine.";
   }
   if (text.includes("unusual_activity") || text.includes("unusual activity")) {
     return "ElevenLabs blocked free-plan use from this connection (\"unusual activity\"). This happens with VPNs or several free accounts. Turn off any VPN, or upgrade to a paid ElevenLabs plan. Your key is fine.";

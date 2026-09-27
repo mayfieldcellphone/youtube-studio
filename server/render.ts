@@ -28,7 +28,7 @@ export function startRender(videoId: string) {
   queue = queue
     .then(() => render(videoId))
     .catch((err: Error) => {
-      console.error(`Render ${videoId} failed:`, err);
+      console.error(`[${new Date().toLocaleTimeString()}] Making video ${videoId} failed: ${err.message}`);
       const video = db.video(videoId);
       if (video?.render) db.updateVideo(videoId, { render: { ...video.render, error: err.message, finishedAt: new Date().toISOString() } });
     })

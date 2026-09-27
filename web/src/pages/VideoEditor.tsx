@@ -302,6 +302,18 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
                   AI voiceover (the channel's voice engine), matching stock footage (Pexels) and captions, edited into a{" "}
                   {video.format === "short" ? "vertical Short" : "horizontal video"}. Takes a few minutes.
                 </p>
+                {channel && (
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Voice:{" "}
+                    <b>
+                      {{ gemini: "Gemini", elevenlabs: "ElevenLabs", kokoro: "Kokoro (free)" }[
+                        channel.voiceEngine ?? (status.gemini ? "gemini" : status.voice ? "elevenlabs" : "kokoro")
+                      ]}
+                      {channel.voiceId && channel.voiceEngine !== "elevenlabs" ? `, ${channel.voiceId}` : ""}
+                    </b>{" "}
+                    · <a className="underline" href={`#/channels/${channel.id}/edit`}>change</a>
+                  </p>
+                )}
               </div>
               {!renderRunning && (
                 <button

@@ -336,7 +336,7 @@ app.post("/api/videos/:id/render", async (req, res) => {
     const reset = usage.resetsAt ? ` It resets on ${new Date(usage.resetsAt).toDateString()}.` : "";
     throw new HttpError(
       400,
-      `Not enough ElevenLabs voice characters: this script needs about ${needed.toLocaleString()}, you have ${left.toLocaleString()} left this month.${reset} Upgrade your ElevenLabs plan or use a shorter script.`,
+      `Not enough ElevenLabs voice characters: this script needs about ${needed.toLocaleString()}, you have ${left.toLocaleString()} left this month.${reset} This channel uses ElevenLabs: to keep going now, open Edit channel and set Voice engine to Gemini or Kokoro (free), or upgrade your ElevenLabs plan.`,
     );
   }
   startRender(video.id);
@@ -444,7 +444,9 @@ app.use("/api", (_req, res) => {
   res.status(404).json({ error: "Not found." });
 });
 
-app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
+  // Show every failure in the app's window too, so problems can be diagnosed from there.
+  console.error(`[${new Date().toLocaleTimeString()}] ${req.method} ${req.path} failed: ${(err as Error)?.message ?? err}`);
   if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
   if (err instanceof z.ZodError) {
     return res.status(400).json({ error: err.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") });
@@ -452,6 +454,9 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   if (err instanceof multer.MulterError) return res.status(400).json({ error: err.message });
   if (err instanceof Anthropic.AuthenticationError) {
     return res.status(502).json({ error: "Your Claude (Anthropic) key was rejected. Check box 1 on the Setup page: it must start with sk-ant-. If it does, create a new key at console.anthropic.com and make sure your account has credit." });
+  }
+  if (err instanceof Anthropic.APIError && /credit balance/i.test(err.message)) {
+    return res.status(402).json({ error: "Your Anthropic (Claude) account has no credit left, so ideas, research and scripts can't be written. Add credit at console.anthropic.com → Billing, then try again." });
   }
   if (err instanceof Anthropic.RateLimitError) {
     return res.status(503).json({ error: "The AI is busy right now. Wait a minute and try again." });
