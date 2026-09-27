@@ -6,7 +6,7 @@ import ffmpegPath from "ffmpeg-static";
 import { DATA_DIR, db, UPLOAD_DIR, type VideoLook } from "./db";
 import { planScenes } from "./ai";
 import { download, findFootage, type Footage, type Word } from "./media";
-import { synthesize, voiceFor } from "./voices";
+import { synthesizeScenes, voiceFor } from "./voices";
 
 const FONT_DIR = path.resolve("assets/fonts");
 const FPS = 30;
@@ -68,12 +68,13 @@ async function render(videoId: string) {
 
     // 1. Voiceover for each scene (per-scene audio gives exact scene lengths and caption timings).
     const voice = voiceFor(channel);
-    const voices: { file: string; words: Word[]; duration: number }[] = [];
-    for (const [i, scene] of scenes.entries()) {
-      stage(`Recording voiceover (${i + 1}/${n})`, 6 + (29 * i) / n);
-      const { file, words, duration } = await synthesize(scene.narration, voice, path.join(work, `voice-${i}`));
-      voices.push({ file, words, duration: Math.max(duration, 0.5) + GAP });
-    }
+    const narrated = await synthesizeScenes(
+      scenes.map((s) => s.narration),
+      voice,
+      path.join(work, "voice"),
+      (done, total) => stage(`Recording voiceover (${done + 1}/${total})`, 6 + (29 * done) / total),
+    );
+    const voices = narrated.map((v) => ({ ...v, duration: Math.max(v.duration, 0.5) + GAP }));
 
     // 2. Plan shots: each scene's time is split between its shots. Frame counts come from
     //    cumulative times so the picture never drifts from the narration.

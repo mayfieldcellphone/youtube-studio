@@ -31,14 +31,28 @@ export function voiceFor(channel: Channel): VoiceChoice {
   const engine: VoiceEngine =
     channel.voiceEngine ?? (geminiConfigured() ? "gemini" : elevenConfigured() ? "elevenlabs" : "kokoro");
   // Without a style, Gemini reads neutrally; pick one that fits the channel's look.
-  const style =
-    channel.voiceStyle?.trim() ||
-    (channel.look === "cinematic"
-      ? "Narrate slowly and suspensefully, like a documentary narrator telling a true mystery, with dramatic pauses"
-      : channel.look === "warm"
-        ? "Narrate in a warm, friendly and confident voice, like a trusted friend giving advice"
-        : "Narrate in a clear, upbeat and engaging YouTube voice");
-  return { engine, voiceId: channel.voiceId || undefined, style };
+  const style = channel.voiceStyle?.trim() || DEFAULT_STYLES[channel.look ?? "clean"];
+  return { engine, voiceId: validVoice(engine, channel.voiceId), style };
+}
+
+export const DEFAULT_STYLES = {
+  cinematic:
+    "You are a seasoned true-crime documentary narrator. Speak in a low, calm, intimate voice at a slow pace. Let tension build, pause briefly before reveals, and drop your voice slightly on ominous lines. Never sound cheerful",
+  warm: "You are a trusted friend who is good with money. Speak warmly and confidently at a relaxed pace, with a hint of a smile, emphasising the key numbers",
+  clean: "You are an energetic but credible tech YouTuber. Speak clearly and briskly, with natural enthusiasm and emphasis on the most useful points",
+} as const;
+
+/**
+ * A saved voice only applies to the engine it came from: an ElevenLabs voice ID sent to
+ * Gemini fails. Anything that doesn't belong to the engine falls back to its default.
+ */
+function validVoice(engine: VoiceEngine, voiceId?: string) {
+  if (!voiceId) return undefined;
+  const isGemini = GEMINI_VOICES.some(([name]) => name === voiceId);
+  const isKokoro = voiceId in KOKORO_VOICES;
+  if (engine === "gemini") return isGemini ? voiceId : undefined;
+  if (engine === "kokoro") return isKokoro ? voiceId : undefined;
+  return isGemini || isKokoro ? undefined : voiceId;
 }
 
 export function engineReady(engine: VoiceEngine) {
@@ -52,6 +66,91 @@ export async function listVoices(engine: VoiceEngine): Promise<VoiceOption[]> {
   if (engine === "gemini") return GEMINI_VOICES.map(([id, description]) => ({ id, name: id, description }));
   return Object.entries(KOKORO_VOICES).map(([id, [name, description]]) => ({ id, name, description }));
 }
+
+export interface SceneAudio {
+  file: string;
+  words: Word[];
+  duration: number;
+}
+
+/**
+ * Narrates a list of scenes. Gemini and Kokoro read several scenes at once (up to about 45
+ * seconds of speech), so the delivery flows and builds like one continuous narration
+ * instead of restarting every sentence. The audio is then cut back into scenes at the
+ * quietest moment near each scene boundary.
+ */
+export async function synthesizeScenes(
+  texts: string[],
+  voice: VoiceChoice,
+  outBase: string,
+  onProgress: (done: number, total: number) => void,
+): Promise<SceneAudio[]> {
+  const results: SceneAudio[] = [];
+  if (voice.engine === "elevenlabs") {
+    for (const [i, text] of texts.entries()) {
+      onProgress(i, texts.length);
+      results.push(await synthesize(text, voice, `${outBase}-${i}`));
+    }
+    return results;
+  }
+
+  const chunks: number[][] = [];
+  for (const [i, text] of texts.entries()) {
+    const last = chunks[chunks.length - 1];
+    const length = last ? last.reduce((n, j) => n + texts[j].length + 1, 0) : Infinity;
+    if (last && length + text.length <= MAX_CHUNK_CHARS) last.push(i);
+    else chunks.push([i]);
+  }
+
+  for (const [c, scenes] of chunks.entries()) {
+    onProgress(c, chunks.length);
+    const text = scenes.map((i) => texts[i]).join(" ");
+    const raw = voice.engine === "gemini" ? await geminiSpeak(text, voice) : await kokoroSpeak(text, voice.voiceId || DEFAULT_KOKORO);
+    const samples = raw.samples instanceof Float32Array ? raw.samples : Float32Array.from(raw.samples, (v) => v / 32768);
+    const cuts = sceneCuts(scenes.map((i) => texts[i]), samples, raw.rate);
+    for (const [k, i] of scenes.entries()) {
+      const part = samples.subarray(cuts[k], cuts[k + 1]);
+      const file = `${outBase}-${i}.wav`;
+      writeWav(file, part, raw.rate);
+      const duration = part.length / raw.rate;
+      results[i] = { file, words: estimateWords(texts[i], duration), duration };
+    }
+  }
+  return results;
+}
+
+const MAX_CHUNK_CHARS = 700;
+
+/** Sample positions where each scene starts (plus the end), snapped to nearby pauses. */
+function sceneCuts(texts: string[], samples: Float32Array, rate: number) {
+  const weights = texts.map((t) => t.split(/\s+/).filter(Boolean).reduce((n, w) => n + wordWeight(w), 0));
+  const total = weights.reduce((a, b) => a + b, 0) || 1;
+  const frame = Math.round(rate * 0.02);
+  const energy = (at: number) => {
+    let sum = 0;
+    for (let i = at; i < Math.min(at + frame, samples.length); i++) sum += samples[i] * samples[i];
+    return sum;
+  };
+  const cuts = [0];
+  let acc = 0;
+  for (let k = 0; k < texts.length - 1; k++) {
+    acc += weights[k];
+    const guess = Math.round((acc / total) * samples.length);
+    // Look up to 0.4 s either side for the quietest moment: the pause between sentences.
+    const window = Math.round(rate * 0.4);
+    let best = guess;
+    let bestEnergy = Infinity;
+    for (let at = Math.max(cuts[k] + frame, guess - window); at <= Math.min(samples.length - frame, guess + window); at += frame) {
+      const e = energy(at);
+      if (e < bestEnergy) [best, bestEnergy] = [at, e];
+    }
+    cuts.push(best);
+  }
+  cuts.push(samples.length);
+  return cuts;
+}
+
+const wordWeight = (t: string) => t.length + 1 + (/[.!?…]$/.test(t) ? 6 : /[,;:—-]$/.test(t) ? 3 : 0);
 
 /** Writes narration for `text` next to `outBase` (extension added) and returns timings. */
 export async function synthesize(text: string, voice: VoiceChoice, outBase: string) {
@@ -262,7 +361,7 @@ function writeWav(file: string, samples: Int16Array | Float32Array, rate: number
 export function estimateWords(text: string, duration: number): Word[] {
   const tokens = text.split(/\s+/).filter(Boolean);
   if (!tokens.length || duration <= 0) return [];
-  const weight = (t: string) => t.length + 1 + (/[.!?…]$/.test(t) ? 6 : /[,;:—-]$/.test(t) ? 3 : 0);
+  const weight = wordWeight;
   const total = tokens.reduce((n, t) => n + weight(t), 0);
   const lead = Math.min(0.1, duration * 0.02);
   const span = Math.max(duration - lead * 2, 0.1);

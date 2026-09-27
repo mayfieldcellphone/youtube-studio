@@ -309,7 +309,7 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
                       {{ gemini: "Gemini", elevenlabs: "ElevenLabs", kokoro: "Kokoro (free)" }[
                         channel.voiceEngine ?? (status.gemini ? "gemini" : status.voice ? "elevenlabs" : "kokoro")
                       ]}
-                      {channel.voiceId && channel.voiceEngine !== "elevenlabs" ? `, ${channel.voiceId}` : ""}
+                      {channel.voiceId && (channel.voiceEngine === "gemini" || channel.voiceEngine === "kokoro") ? `, ${channel.voiceId}` : ""}
                     </b>{" "}
                     · <a className="underline" href={`#/channels/${channel.id}/edit`}>change</a>
                   </p>

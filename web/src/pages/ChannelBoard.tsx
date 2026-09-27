@@ -21,6 +21,7 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
   const [newTitle, setNewTitle] = useState("");
   const [newFormat, setNewFormat] = useState<VideoFormat>("short");
   const [showAdd, setShowAdd] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const { busy, error, setError, run } = useAction();
 
   const load = useCallback(async () => setVideos(await api.videos(channelId)), [channelId]);
@@ -35,9 +36,11 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
 
   const generate = () =>
     run("ideas", async () => {
-      await api.generateIdeas(channel.id, count, focus);
+      setNotice(null);
+      const ideas = await api.generateIdeas(channel.id, count, focus);
       setFocus("");
       await load();
+      setNotice(`Added ${ideas.length} new ideas. They're at the top of the Ideas column below.`);
     });
 
   const addIdea = () =>
@@ -78,6 +81,12 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
       )}
       {youtubeResult === "error" && <div className="mb-4"><ErrorBox error={`Could not connect YouTube: ${youtubeMessage}`} /></div>}
 
+      {notice && (
+        <div className="mb-4 flex justify-between gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 dark:border-green-900 dark:bg-green-950/40 dark:text-green-300">
+          <span>{notice}</span>
+          <button className="font-medium underline" onClick={() => setNotice(null)}>Dismiss</button>
+        </div>
+      )}
       {error && (
         <div className="mb-4">
           <ErrorBox error={error} onClose={() => setError(null)} />
@@ -193,7 +202,12 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
         {COLUMNS.map((col) => {
           const items = videos
             .filter((v) => col.statuses.includes(v.status))
-            .sort((a, b) => (a.scheduledAt ?? a.createdAt).localeCompare(b.scheduledAt ?? b.createdAt));
+            // Newest ideas first, so freshly generated ones are at the top; the rest by date.
+            .sort((a, b) =>
+              col.title === "Ideas"
+                ? b.createdAt.localeCompare(a.createdAt)
+                : (a.scheduledAt ?? a.createdAt).localeCompare(b.scheduledAt ?? b.createdAt),
+            );
           return (
             <section key={col.title} className="rounded-xl bg-zinc-100/70 p-3 dark:bg-zinc-900/60">
               <div className="mb-1 flex items-baseline justify-between px-1">

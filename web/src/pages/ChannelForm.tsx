@@ -66,7 +66,15 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
 
   useEffect(() => {
     setVoices([]);
-    if (engineReady) api.voices(engine).then(setVoices).catch(() => {});
+    if (!engineReady) return;
+    api
+      .voices(engine)
+      .then((list) => {
+        setVoices(list);
+        // A voice saved for another engine (e.g. an ElevenLabs voice ID) doesn't apply here.
+        setForm((f) => (f.voiceId && !list.some((v) => v.id === f.voiceId) ? { ...f, voiceId: "" } : f));
+      })
+      .catch(() => {});
   }, [engine, engineReady]);
 
   if (channelId && !existing) return <p className="muted">Channel not found.</p>;
@@ -197,7 +205,13 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
             <input
               value={form.voiceStyle ?? ""}
               onChange={(e) => set("voiceStyle", e.target.value)}
-              placeholder="e.g. Narrate slowly and suspensefully, like a documentary narrator"
+              placeholder={
+                form.look === "cinematic"
+                  ? "Default: a seasoned true-crime documentary narrator, low, calm and slow, building tension"
+                  : form.look === "warm"
+                    ? "Default: a trusted friend who is good with money, warm and confident"
+                    : "Default: an energetic but credible tech YouTuber, clear and brisk"
+              }
             />
           </Field>
         )}
