@@ -30,7 +30,15 @@ export const geminiConfigured = () => Boolean(process.env.GEMINI_API_KEY);
 export function voiceFor(channel: Channel): VoiceChoice {
   const engine: VoiceEngine =
     channel.voiceEngine ?? (geminiConfigured() ? "gemini" : elevenConfigured() ? "elevenlabs" : "kokoro");
-  return { engine, voiceId: channel.voiceId || undefined, style: channel.voiceStyle || undefined };
+  // Without a style, Gemini reads neutrally; pick one that fits the channel's look.
+  const style =
+    channel.voiceStyle?.trim() ||
+    (channel.look === "cinematic"
+      ? "Narrate slowly and suspensefully, like a documentary narrator telling a true mystery, with dramatic pauses"
+      : channel.look === "warm"
+        ? "Narrate in a warm, friendly and confident voice, like a trusted friend giving advice"
+        : "Narrate in a clear, upbeat and engaging YouTube voice");
+  return { engine, voiceId: channel.voiceId || undefined, style };
 }
 
 export function engineReady(engine: VoiceEngine) {

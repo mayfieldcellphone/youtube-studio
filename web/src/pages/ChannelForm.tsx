@@ -193,7 +193,7 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
           </Field>
         )}
         {engine === "gemini" && (
-          <Field label="Narration style" hint="Describe how the narrator should sound. Gemini follows it; the other engines ignore it.">
+          <Field label="Narration style" hint="Describe how the narrator should sound. Gemini follows it; the other engines ignore it. Leave empty to use a style that fits the video look.">
             <input
               value={form.voiceStyle ?? ""}
               onChange={(e) => set("voiceStyle", e.target.value)}
