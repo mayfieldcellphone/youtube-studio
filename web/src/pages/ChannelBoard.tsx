@@ -78,6 +78,12 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
       )}
       {youtubeResult === "error" && <div className="mb-4"><ErrorBox error={`Could not connect YouTube: ${youtubeMessage}`} /></div>}
 
+      {error && (
+        <div className="mb-4">
+          <ErrorBox error={error} onClose={() => setError(null)} />
+        </div>
+      )}
+
       <div className="mb-6 grid gap-4 lg:grid-cols-2">
         <div className="card">
           <div className="mb-3 flex items-center gap-2 font-medium">
@@ -182,8 +188,6 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
           )}
         </div>
       </div>
-
-      <ErrorBox error={error} onClose={() => setError(null)} />
 
       <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         {COLUMNS.map((col) => {

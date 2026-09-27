@@ -13,7 +13,7 @@ import { footageConfigured, voiceCharactersLeft, voiceConfigured } from "./media
 import { engineReady, geminiConfigured, listVoices, previewVoice, voiceFor, type VoiceEngine } from "./voices";
 import { ffmpegAvailable, isRendering, recoverInterruptedRenders, startRender } from "./render";
 import { authUrl, completeAuth, redirectUri, syncChannel, uploadAndSchedule, youtubeConfigured } from "./youtube";
-import { describeSettings, loadSettings, saveSettings, SETTING_KEYS } from "./settings";
+import { describeSettings, keyProblems, loadSettings, saveSettings, SETTING_KEYS, wrongBox, type SettingKey } from "./settings";
 
 loadSettings();
 
@@ -58,6 +58,7 @@ app.get("/api/status", (req, res) => {
     gemini: geminiConfigured(),
     footage: footageConfigured(),
     ffmpeg: ffmpegAvailable(),
+    keyProblems: loggedIn(req) ? keyProblems() : [],
     redirectUri: redirectUri(),
   });
 });
@@ -102,7 +103,7 @@ function getVideo(id: string) {
 }
 
 function requireAi() {
-  if (!aiConfigured()) throw new HttpError(400, "Add ANTHROPIC_API_KEY to your .env file to use AI features.");
+  if (!aiConfigured()) throw new HttpError(400, "Add your Claude (Anthropic) key on the Setup page (box 1) to use AI features.");
 }
 
 // ---------- Settings (keys entered on the Setup page) ----------
@@ -113,6 +114,10 @@ app.get("/api/settings", (_req, res) => {
 
 app.put("/api/settings", (req, res) => {
   const values = z.object(Object.fromEntries(SETTING_KEYS.map((k) => [k, z.string().max(500).optional()]))).parse(req.body);
+  for (const [key, value] of Object.entries(values)) {
+    const problem = value && wrongBox(key as SettingKey, value.trim());
+    if (problem) throw new HttpError(400, problem);
+  }
   saveSettings(values);
   // Keep this browser logged in after setting or changing the password.
   if (values.APP_PASSWORD !== undefined) logIn(res);
@@ -177,7 +182,7 @@ app.post("/api/channels/:id/sync", async (req, res) => {
 // ---------- YouTube connection ----------
 
 app.get("/api/channels/:id/youtube/connect", (req, res) => {
-  if (!youtubeConfigured()) throw new HttpError(400, "Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to .env first.");
+  if (!youtubeConfigured()) throw new HttpError(400, "Add your Google Client ID and Client secret on the Setup page (box 4) first.");
   const channel = getChannel(req.params.id);
   const nonce = crypto.randomBytes(16).toString("hex");
   res.cookie("oauth", `${nonce}:${channel.id}`, { ...cookieOpts(), maxAge: 10 * 60 * 1000 });
@@ -313,7 +318,7 @@ app.get("/api/voice/usage", async (_req, res) => {
 
 app.post("/api/videos/:id/render", async (req, res) => {
   requireAi();
-  if (!footageConfigured()) throw new HttpError(400, "Add PEXELS_API_KEY to .env to find stock footage.");
+  if (!footageConfigured()) throw new HttpError(400, "Add your Pexels key on the Setup page (box 3) to find stock footage.");
   if (!ffmpegAvailable()) throw new HttpError(500, "FFmpeg is missing. Run npm install again.");
   const video = getVideo(req.params.id);
   if (video.youtubeVideoId) throw new HttpError(400, "This video is already on YouTube.");
@@ -446,7 +451,7 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   }
   if (err instanceof multer.MulterError) return res.status(400).json({ error: err.message });
   if (err instanceof Anthropic.AuthenticationError) {
-    return res.status(502).json({ error: "Your Anthropic API key is invalid. Check ANTHROPIC_API_KEY." });
+    return res.status(502).json({ error: "Your Claude (Anthropic) key was rejected. Check box 1 on the Setup page: it must start with sk-ant-. If it does, create a new key at console.anthropic.com and make sure your account has credit." });
   }
   if (err instanceof Anthropic.RateLimitError) {
     return res.status(503).json({ error: "The AI is busy right now. Wait a minute and try again." });

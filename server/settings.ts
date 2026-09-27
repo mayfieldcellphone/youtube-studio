@@ -37,6 +37,39 @@ function write(data: Record<string, string>) {
   fs.writeFileSync(FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
 }
 
+const LOOKS_LIKE: [RegExp, string][] = [
+  [/^sk-ant-/, "a Claude (Anthropic) key"],
+  [/^AIza/, "a Google / Gemini (AI Studio) key"],
+  [/^sk_[0-9a-f]{20,}/i, "an ElevenLabs key"],
+  [/^GOCSPX-/, "a Google Client secret"],
+  [/\.apps\.googleusercontent\.com$/, "a Google Client ID"],
+];
+const EXPECTED: Partial<Record<SettingKey, { pattern: RegExp; name: string; box: string }>> = {
+  ANTHROPIC_API_KEY: { pattern: /^sk-ant-/, name: "a Claude (Anthropic) key", box: "1. AI writing (Claude)" },
+  GEMINI_API_KEY: { pattern: /^AIza/, name: "a Google / Gemini (AI Studio) key", box: "2a. Gemini voice" },
+  ELEVENLABS_API_KEY: { pattern: /^sk_/, name: "an ElevenLabs key", box: "2b. ElevenLabs voice" },
+  GOOGLE_CLIENT_ID: { pattern: /\.apps\.googleusercontent\.com$/, name: "a Google Client ID", box: "4. YouTube (Client ID)" },
+  GOOGLE_CLIENT_SECRET: { pattern: /^GOCSPX-/, name: "a Google Client secret", box: "4. YouTube (Client secret)" },
+};
+
+/** Explains a key that was pasted into the wrong box, or undefined if it looks right. */
+export function wrongBox(key: SettingKey, value: string) {
+  const expected = EXPECTED[key];
+  if (!expected || !value || expected.pattern.test(value)) return undefined;
+  const actual = LOOKS_LIKE.find(([pattern]) => pattern.test(value))?.[1];
+  if (!actual) return undefined; // Unknown format: let the service itself judge it.
+  const home = Object.values(EXPECTED).find((e) => e!.name === actual)?.box;
+  return `This looks like ${actual}, not ${expected.name}.${home ? ` Paste it in the "${home}" box instead.` : ""}`;
+}
+
+/** Saved keys that are in the wrong box (e.g. a Gemini key saved as the Claude key). */
+export function keyProblems() {
+  return SETTING_KEYS.flatMap((key) => {
+    const problem = wrongBox(key, process.env[key] ?? "");
+    return problem ? [`${EXPECTED[key]!.box}: ${problem}`] : [];
+  });
+}
+
 /** Loads saved settings into process.env. Also creates the login-cookie secret on first run. */
 export function loadSettings() {
   const saved = read();

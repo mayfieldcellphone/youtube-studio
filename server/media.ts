@@ -132,7 +132,7 @@ async function pexels(path: string) {
   const res = await fetch(`https://api.pexels.com${path}`, {
     headers: { Authorization: process.env.PEXELS_API_KEY ?? "" },
   });
-  if (res.status === 401 || res.status === 403) throw new Error("Your Pexels API key is invalid. Check PEXELS_API_KEY.");
+  if (res.status === 401 || res.status === 403) throw new Error("Your Pexels key was rejected. Check box 3 on the Setup page.");
   if (res.status === 429) throw new Error("Pexels rate limit reached. Try again in an hour.");
   if (!res.ok) throw new Error(`Pexels error ${res.status}`);
   return res.json();

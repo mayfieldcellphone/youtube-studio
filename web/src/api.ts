@@ -80,6 +80,7 @@ export interface Status {
   youtube: boolean;
   voice: boolean;
   gemini: boolean;
+  keyProblems: string[];
   footage: boolean;
   ffmpeg: boolean;
   redirectUri: string;

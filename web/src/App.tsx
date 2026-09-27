@@ -116,7 +116,20 @@ export default function App() {
             </button>
           )}
         </aside>
-        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 md:px-8 md:py-8">{page}</main>
+        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 md:px-8 md:py-8">
+          {status.keyProblems?.length > 0 && (
+            <div className="mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+              <p className="font-medium">A key is in the wrong box on the Setup page:</p>
+              <ul className="mt-1 list-disc pl-5">
+                {status.keyProblems.map((p) => (
+                  <li key={p}>{p}</li>
+                ))}
+              </ul>
+              <a className="mt-1 inline-block font-medium underline" href="#/setup">Fix it on the Setup page</a>
+            </div>
+          )}
+          {page}
+        </main>
       </div>
     </AppContext.Provider>
   );
