@@ -81,6 +81,7 @@ export default function App() {
           <div className="flex items-center gap-2 px-4 py-4 font-semibold">
             <Clapperboard className="h-6 w-6 text-red-600" />
             YouTube Studio
+            <span className="ml-auto rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-normal text-zinc-500 dark:bg-zinc-800">v{__APP_VERSION__}</span>
           </div>
           <nav className="flex gap-1 overflow-x-auto px-2 pb-3 md:flex-col md:pb-0">
             <NavLink href="/" icon={<LayoutDashboard className="h-4 w-4" />} active={!section}>
