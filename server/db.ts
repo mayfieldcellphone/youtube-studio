@@ -71,6 +71,18 @@ export interface RenderJob {
   finishedAt?: string;
 }
 
+export type StopAfter = "script" | "video" | "schedule";
+
+/** Automatic production of a video through several steps (see pipeline.ts). */
+export interface PipelineJob {
+  stopAfter: StopAfter;
+  step: string;
+  result?: string;
+  error?: string;
+  startedAt: string;
+  finishedAt?: string;
+}
+
 export interface Video {
   id: string;
   channelId: string;
@@ -83,6 +95,7 @@ export interface Video {
   script: string;
   research?: Research;
   render?: RenderJob;
+  pipeline?: PipelineJob;
   titleOptions: string[];
   description: string;
   tags: string[];

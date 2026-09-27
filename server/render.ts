@@ -20,19 +20,23 @@ let queue: Promise<unknown> = Promise.resolve();
 
 export const isRendering = (videoId: string) => rendering.has(videoId);
 
-/** Renders are CPU-heavy, so they run one at a time. */
-export function startRender(videoId: string) {
+/**
+ * Renders are CPU-heavy, so they run one at a time. The returned promise settles when this
+ * video is finished (callers that don't wait should attach a catch).
+ */
+export function startRender(videoId: string): Promise<void> {
   if (rendering.has(videoId)) throw new Error("This video is already being made.");
   rendering.add(videoId);
   db.updateVideo(videoId, { render: { stage: "Waiting to start", progress: 0, startedAt: new Date().toISOString() } });
-  queue = queue
-    .then(() => render(videoId))
+  const job = queue.then(() => render(videoId));
+  queue = job
     .catch((err: Error) => {
       console.error(`[${new Date().toLocaleTimeString()}] Making video ${videoId} failed: ${err.message}`);
       const video = db.video(videoId);
       if (video?.render) db.updateVideo(videoId, { render: { ...video.render, error: err.message, finishedAt: new Date().toISOString() } });
     })
     .finally(() => rendering.delete(videoId));
+  return job;
 }
 
 /** Marks renders that were running when the server stopped as failed. */

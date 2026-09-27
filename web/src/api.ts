@@ -1,6 +1,8 @@
 export type VideoStatus = "idea" | "scripted" | "ready" | "scheduled" | "published" | "failed";
 export type VideoFormat = "short" | "long";
 
+export type StopAfter = "script" | "video" | "schedule";
+
 export interface Channel {
   id: string;
   name: string;
@@ -40,6 +42,7 @@ export interface Video {
   script: string;
   research?: { notes: string; sources: { title: string; url: string }[]; createdAt: string };
   render?: { stage: string; progress: number; error?: string; startedAt: string; finishedAt?: string };
+  pipeline?: { stopAfter: StopAfter; step: string; result?: string; error?: string; startedAt: string; finishedAt?: string };
   titleOptions: string[];
   description: string;
   tags: string[];
@@ -161,6 +164,9 @@ export const api = {
   thumbnailUrl: (v: Video) => `/api/videos/${v.id}/thumbnail?t=${encodeURIComponent(v.updatedAt)}`,
   publish: (id: string) => request<Video & { uploading: boolean }>("POST", `/api/videos/${id}/publish`),
   uploading: () => request<string[]>("GET", "/api/uploads"),
+  startPipeline: (videoIds: string[], stopAfter: StopAfter) =>
+    request<{ queued: number }>("POST", "/api/pipeline", { videoIds, stopAfter }),
+  cancelPipeline: (id: string) => request<Video>("POST", `/api/videos/${id}/pipeline/cancel`),
 };
 
 export const STATUS_LABELS: Record<VideoStatus, string> = {

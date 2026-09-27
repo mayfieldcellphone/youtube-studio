@@ -12,6 +12,7 @@ import { aiConfigured, generateIdeas, generateMetadata, generateScript, research
 import { footageConfigured, voiceCharactersLeft, voiceConfigured } from "./media";
 import { engineReady, geminiConfigured, listVoices, previewVoice, voiceFor, type VoiceEngine } from "./voices";
 import { ffmpegAvailable, isRendering, recoverInterruptedRenders, startRender } from "./render";
+import { cancelPipeline, inPipeline, recoverInterruptedPipelines, startPipeline } from "./pipeline";
 import { authUrl, completeAuth, redirectUri, syncChannel, uploadAndSchedule, youtubeConfigured } from "./youtube";
 import { describeSettings, keyProblems, loadSettings, saveSettings, SETTING_KEYS, wrongBox, type SettingKey } from "./settings";
 
@@ -100,6 +101,13 @@ function getVideo(id: string) {
   const video = db.video(id);
   if (!video) throw new HttpError(404, "Video not found.");
   return video;
+}
+
+/** Manual actions are blocked while the automatic worker is busy with the video. */
+function notAutomated(video: Video) {
+  if (inPipeline(video.id)) {
+    throw new HttpError(409, "This video is being worked on automatically. Wait for it to finish, or cancel it first.");
+  }
 }
 
 function requireAi() {
@@ -268,6 +276,7 @@ app.delete("/api/videos/:id", (req, res) => {
 app.post("/api/videos/:id/script", async (req, res) => {
   requireAi();
   const video = getVideo(req.params.id);
+  notAutomated(video);
   const script = await generateScript(getChannel(video.channelId), video);
   res.json(publicVideo(db.updateVideo(video.id, { script, status: video.status === "idea" ? "scripted" : video.status })!));
 });
@@ -275,6 +284,7 @@ app.post("/api/videos/:id/script", async (req, res) => {
 app.post("/api/videos/:id/research", async (req, res) => {
   requireAi();
   const video = getVideo(req.params.id);
+  notAutomated(video);
   const result = await research(getChannel(video.channelId), video);
   res.json(publicVideo(db.updateVideo(video.id, { research: { ...result, createdAt: new Date().toISOString() } })!));
 });
@@ -282,6 +292,7 @@ app.post("/api/videos/:id/research", async (req, res) => {
 app.post("/api/videos/:id/metadata", async (req, res) => {
   requireAi();
   const video = getVideo(req.params.id);
+  notAutomated(video);
   const meta = await generateMetadata(getChannel(video.channelId), video);
   res.json(
     publicVideo(
@@ -322,6 +333,7 @@ app.post("/api/videos/:id/render", async (req, res) => {
   if (!ffmpegAvailable()) throw new HttpError(500, "FFmpeg is missing. Run npm install again.");
   const video = getVideo(req.params.id);
   if (video.youtubeVideoId) throw new HttpError(400, "This video is already on YouTube.");
+  notAutomated(video);
   if (!video.script.trim()) throw new HttpError(400, "Write the script first.");
   const voice = voiceFor(getChannel(video.channelId));
   if (!engineReady(voice.engine)) {
@@ -339,7 +351,7 @@ app.post("/api/videos/:id/render", async (req, res) => {
       `Not enough ElevenLabs voice characters: this script needs about ${needed.toLocaleString()}, you have ${left.toLocaleString()} left this month.${reset} This channel uses ElevenLabs: to keep going now, open Edit channel and set Voice engine to Gemini or Kokoro (free), or upgrade your ElevenLabs plan.`,
     );
   }
-  startRender(video.id);
+  startRender(video.id).catch(() => {}); // errors are recorded on the video
   res.json(publicVideo(db.video(video.id)!));
 });
 
@@ -347,6 +359,29 @@ app.get("/api/videos/:id/video", (req, res) => {
   const video = getVideo(req.params.id);
   if (!video.videoFile) throw new HttpError(404, "No video file.");
   res.sendFile(video.videoFile.path);
+});
+
+// ---------- Automatic production of several videos ----------
+
+app.post("/api/pipeline", (req, res) => {
+  const { videoIds, stopAfter } = z
+    .object({ videoIds: z.array(z.string()).min(1).max(10), stopAfter: z.enum(["script", "video", "schedule"]) })
+    .parse(req.body);
+  const videos = videoIds.map(getVideo);
+  if (videos.some((v) => !v.script.trim() || !v.research)) requireAi();
+  if (stopAfter !== "script" && !footageConfigured()) throw new HttpError(400, "Add your Pexels key on the Setup page (box 3) first.");
+  if (stopAfter === "schedule") {
+    const unconnected = videos.find((v) => !db.channel(v.channelId)?.youtube);
+    if (unconnected) throw new HttpError(400, "Connect this channel to YouTube first, or choose to stop before scheduling.");
+  }
+  const queued = startPipeline(videoIds, stopAfter);
+  res.json({ queued: queued.length });
+});
+
+app.post("/api/videos/:id/pipeline/cancel", (req, res) => {
+  const video = getVideo(req.params.id);
+  cancelPipeline(video.id);
+  res.json(publicVideo(db.video(video.id)!));
 });
 
 // ---------- Files ----------
@@ -370,6 +405,7 @@ app.post("/api/videos/:id/files/:kind", upload.single("file"), (req, res) => {
   if (!file) return reject("No file received.");
   if (video.youtubeVideoId) return reject("This video is already on YouTube.");
   if (isRendering(video.id)) return reject("Wait until the video maker has finished.");
+  if (inPipeline(video.id)) return reject("This video is being worked on automatically.");
 
   const stored = { path: file.path, name: file.originalname, size: file.size, mimeType: file.mimetype };
   let patch: Partial<Video>;
@@ -421,6 +457,7 @@ app.post("/api/videos/:id/publish", (req, res) => {
   const video = getVideo(req.params.id);
   if (video.youtubeVideoId) throw new HttpError(400, "This video is already on YouTube.");
   if (uploading.has(video.id)) throw new HttpError(409, "This video is already uploading.");
+  notAutomated(video);
   if (isRendering(video.id)) throw new HttpError(409, "Wait until the video maker has finished.");
   if (!video.videoFile) throw new HttpError(400, "Upload the video file first.");
   if (!db.channel(video.channelId)?.youtube) throw new HttpError(400, "Connect this channel to YouTube first.");
@@ -481,6 +518,7 @@ if (PROD) {
 }
 
 recoverInterruptedRenders();
+recoverInterruptedPipelines();
 
 app.listen(PORT, HOST, () => {
   console.log(`\n  YouTube Studio is running. Open http://localhost:${PORT} in your browser.\n  Keep this window open while you use the app.\n`);

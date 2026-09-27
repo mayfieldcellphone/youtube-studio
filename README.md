@@ -14,6 +14,8 @@ Plan, write and schedule videos for several YouTube channels from one place.
 
 Ready-made channel presets: **AI Tools Explained**, **Money Moves** (finance and side hustles) and **Untold History** (mysteries and history).
 
+**Make several videos automatically:** on a channel's board, tick 2-3 ideas (or click "Select next 3 ideas"), choose how far the app should go on its own (script only; full video for you to review; or all the way to scheduling in your next posting slots), and it works through them one by one in the background, showing progress on each card. Any video can still be done step by step by hand.
+
 A kanban board per channel tracks each video from idea to scripted, ready, scheduled and published. A calendar shows every channel's schedule, and each channel's posting days are used to suggest the next free slot.
 
 ## Run it (easy way)

@@ -62,15 +62,16 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
 
   // While the video maker runs in the background, poll its progress.
   const renderRunning = Boolean(video?.render && !video.render.finishedAt);
+  const automated = Boolean(video?.pipeline && !video.pipeline.finishedAt);
   useEffect(() => {
-    if (!renderRunning) return;
+    if (!renderRunning && !automated) return;
     const timer = setInterval(async () => {
       try {
         apply(await api.video(videoId));
       } catch {}
     }, 2000);
     return () => clearInterval(timer);
-  }, [renderRunning, videoId, apply]);
+  }, [renderRunning, automated, videoId, apply]);
 
   // While YouTube upload runs in the background, poll until it finishes.
   useEffect(() => {
@@ -190,6 +191,19 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
 
       <ErrorBox error={error} onClose={() => setError(null)} />
       {video.error && !publishing && <ErrorBox error={video.error} />}
+      {automated && video.pipeline && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
+          <span className="flex items-center gap-2">
+            <Spinner /> Being made automatically: <b>{video.pipeline.step}</b>. The page updates by itself.
+          </span>
+          <button className="btn-secondary" onClick={() => run("cancel", async () => apply(await api.cancelPipeline(video.id)))}>
+            Cancel
+          </button>
+        </div>
+      )}
+      {!automated && video.pipeline?.error && video.pipeline.error !== "Cancelled." && (
+        <ErrorBox error={`Automatic production stopped: ${video.pipeline.error}`} />
+      )}
 
       <Step n={1} title="The idea">
         <div className="grid gap-4 md:grid-cols-3">

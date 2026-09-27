@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { BarChart3, Eye, Link2, Pencil, Plus, RefreshCw, Sparkles, Unlink } from "lucide-react";
-import { api, compact, formatDateTime, STATUS_LABELS, type Video, type VideoFormat, type VideoStatus } from "../api";
+import { BarChart3, Eye, Link2, Pencil, Plus, RefreshCw, Sparkles, Unlink, Wand2 } from "lucide-react";
+import { api, compact, formatDateTime, STATUS_LABELS, type StopAfter, type Video, type VideoFormat, type VideoStatus } from "../api";
 import { navigate, useApp } from "../App";
 import { ErrorBox, FormatBadge, PageHeader, Spinner, useAction } from "../components/ui";
 
@@ -22,12 +22,22 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
   const [newFormat, setNewFormat] = useState<VideoFormat>("short");
   const [showAdd, setShowAdd] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [stopAfter, setStopAfter] = useState<StopAfter>("video");
   const { busy, error, setError, run } = useAction();
 
   const load = useCallback(async () => setVideos(await api.videos(channelId)), [channelId]);
   useEffect(() => {
     load().catch((e) => setError(e.message));
   }, [load, setError]);
+
+  // While videos are being produced automatically, refresh their progress.
+  const working = videos.some((v) => (v.pipeline && !v.pipeline.finishedAt) || (v.render && !v.render.finishedAt));
+  useEffect(() => {
+    if (!working) return;
+    const timer = setInterval(() => load().catch(() => {}), 3000);
+    return () => clearInterval(timer);
+  }, [working, load]);
 
   const youtubeResult = params.get("youtube");
   const youtubeMessage = params.get("message");
@@ -48,6 +58,38 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
       const video = await api.createVideo({ channelId: channel.id, title: newTitle, format: newFormat });
       navigate(`/videos/${video.id}`);
     });
+
+  const selectable = (v: Video) => !v.youtubeVideoId && !(v.pipeline && !v.pipeline.finishedAt) && ["idea", "scripted", "ready", "failed"].includes(v.status);
+  const toggle = (id: string) =>
+    setSelected((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const selectNext = (n: number) =>
+    setSelected(
+      new Set(
+        videos
+          .filter((v) => v.status === "idea" && selectable(v))
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+          .slice(0, n)
+          .map((v) => v.id),
+      ),
+    );
+
+  const produce = () =>
+    run("produce", async () => {
+      setNotice(null);
+      const { queued } = await api.startPipeline([...selected], stopAfter);
+      setSelected(new Set());
+      await load();
+      setNotice(
+        `Started ${queued} video${queued === 1 ? "" : "s"}. They're done one after another; each card shows its progress. You can leave this page.`,
+      );
+    });
+
+  const cancel = (id: string) => run("cancel", async () => { await api.cancelPipeline(id); await load(); });
 
   const sync = () =>
     run("sync", async () => {
@@ -198,6 +240,49 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
         </div>
       </div>
 
+      <div className="card mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="flex items-center gap-2 font-medium">
+              <Wand2 className="h-4 w-4 text-red-600" /> Make several videos automatically
+            </p>
+            <p className="muted mt-1">
+              Tick ideas below (or pick the next few), choose how far to go, and the app works through them one by one. To do a
+              video step by step yourself, just click it.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            {[2, 3].map((n) => (
+              <button key={n} className="btn-secondary" onClick={() => selectNext(n)}>
+                Select next {n} ideas
+              </button>
+            ))}
+          </div>
+        </div>
+        {selected.size > 0 && (
+          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+            <span className="text-sm font-medium">{selected.size} selected ·</span>
+            <select className="w-auto" value={stopAfter} onChange={(e) => setStopAfter(e.target.value as StopAfter)}>
+              <option value="script">Research and script, then stop so I can review the writing</option>
+              <option value="video">Make the full video, then stop so I can watch it (recommended)</option>
+              <option value="schedule" disabled={!channel.youtube}>
+                Make the video and schedule it in my next posting slots{channel.youtube ? "" : " (connect YouTube first)"}
+              </option>
+            </select>
+            <button className="btn-primary" onClick={produce} disabled={!!busy}>
+              {busy === "produce" ? <Spinner /> : <Wand2 className="h-4 w-4" />} Start
+            </button>
+            <button className="btn-ghost" onClick={() => setSelected(new Set())}>Clear</button>
+            {stopAfter === "schedule" && (
+              <p className="w-full text-xs text-amber-700 dark:text-amber-400">
+                Videos go out without you watching them first. YouTube demonetizes low-quality, mass-produced videos, so check each
+                one in YouTube Studio before its publish time.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
       <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         {COLUMNS.map((col) => {
           const items = videos
@@ -216,25 +301,61 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
               </div>
               <p className="mb-3 px-1 text-xs text-zinc-500">{col.hint}</p>
               <div className="space-y-2">
-                {items.map((v) => (
-                  <a
-                    key={v.id}
-                    href={`#/videos/${v.id}`}
-                    className="block rounded-lg border border-zinc-200 bg-white p-3 text-sm shadow-sm transition hover:border-red-300 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-red-800"
-                  >
-                    <p className="mb-2 font-medium leading-snug">{v.title}</p>
-                    <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
-                      <FormatBadge format={v.format} />
-                      {v.status === "failed" && <span className="text-red-600">{STATUS_LABELS.failed}</span>}
-                      {v.scheduledAt && ["scheduled", "published"].includes(v.status) && <span>{formatDateTime(v.scheduledAt)}</span>}
-                      {v.stats && (
-                        <span className="inline-flex items-center gap-1">
-                          <Eye className="h-3 w-3" /> {compact(v.stats.views)}
-                        </span>
+                {items.map((v) => {
+                  const job = v.pipeline;
+                  const running = job && !job.finishedAt;
+                  return (
+                    <div
+                      key={v.id}
+                      className={`rounded-lg border bg-white p-3 text-sm shadow-sm transition dark:bg-zinc-900 ${
+                        selected.has(v.id) ? "border-red-500" : "border-zinc-200 hover:border-red-300 dark:border-zinc-800 dark:hover:border-red-800"
+                      }`}
+                    >
+                      <div className="flex items-start gap-2">
+                        {selectable(v) && (
+                          <input
+                            type="checkbox"
+                            className="mt-1 h-4 w-4 accent-red-600"
+                            checked={selected.has(v.id)}
+                            onChange={() => toggle(v.id)}
+                            aria-label={`Select ${v.title}`}
+                          />
+                        )}
+                        <a href={`#/videos/${v.id}`} className="min-w-0 flex-1">
+                          <p className="mb-2 font-medium leading-snug">{v.title}</p>
+                          <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+                            <FormatBadge format={v.format} />
+                            {v.status === "failed" && <span className="text-red-600">{STATUS_LABELS.failed}</span>}
+                            {v.scheduledAt && ["scheduled", "published"].includes(v.status) && <span>{formatDateTime(v.scheduledAt)}</span>}
+                            {v.stats && (
+                              <span className="inline-flex items-center gap-1">
+                                <Eye className="h-3 w-3" /> {compact(v.stats.views)}
+                              </span>
+                            )}
+                          </div>
+                        </a>
+                      </div>
+                      {job && (
+                        <div className="mt-2 border-t border-zinc-100 pt-2 text-xs dark:border-zinc-800">
+                          {running ? (
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="flex items-center gap-1.5 text-zinc-600 dark:text-zinc-300">
+                                <Spinner className="h-3 w-3" />
+                                {job.step}
+                                {job.step === "Making the video" && v.render && !v.render.finishedAt ? ` (${v.render.progress}%)` : ""}
+                              </span>
+                              <button className="text-zinc-500 underline" onClick={() => cancel(v.id)}>Cancel</button>
+                            </div>
+                          ) : job.error ? (
+                            <span className="text-red-600" title={job.error}>✗ {job.error.length > 90 ? `${job.error.slice(0, 90)}…` : job.error}</span>
+                          ) : (
+                            <span className="text-green-700 dark:text-green-400">✓ {job.result}</span>
+                          )}
+                        </div>
                       )}
                     </div>
-                  </a>
-                ))}
+                  );
+                })}
               </div>
             </section>
           );
