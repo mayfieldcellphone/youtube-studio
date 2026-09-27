@@ -7,7 +7,7 @@ Plan, write and schedule videos for several YouTube channels from one place.
 1. **Ideas.** The AI suggests videos people search for, tailored to each channel.
 2. **Research.** The AI searches the web and collects facts, marked confirmed, disputed or theory, with source links.
 3. **Script.** The AI writes a hook-first script from the research, then a second "tough editor" pass rewrites it to cut clichés, sharpen the hook and add cliffhangers. You review and edit it.
-4. **Make the video.** One click produces an expressive ElevenLabs voiceover, a new Pexels shot every few seconds with slow camera movement, a color grade per channel (cinematic, clean or warm), word-by-word captions (the spoken word is highlighted gold in Shorts) and optional background music that ducks under the voice, rendered with FFmpeg as a vertical Short or a horizontal video. You watch the preview. You can also upload a video made anywhere else.
+4. **Make the video.** One click produces a voiceover (Kokoro free/local, Gemini, or ElevenLabs, chosen per channel), a new Pexels shot every few seconds with slow camera movement, a color grade per channel (cinematic, clean or warm), word-by-word captions (the spoken word is highlighted gold in Shorts) and optional background music that ducks under the voice, rendered with FFmpeg as a vertical Short or a horizontal video. You watch the preview. You can also upload a video made anywhere else.
 5. **Title, description and tags.** The AI writes 5 title options, an SEO description, tags, disclaimers and your affiliate links.
 6. **Schedule.** The app uploads the video to YouTube with a publish time, and YouTube publishes it even if this app is offline.
 7. **Grow.** Channel and per-video views, likes and comments show on the dashboard.
@@ -49,9 +49,13 @@ The in-app **Setup** page has the same steps, a box for each key, and a copy but
 
 Create a key at [console.anthropic.com](https://console.anthropic.com) and set `ANTHROPIC_API_KEY`. The app uses `claude-opus-5`, with automatic fallback if a request is declined.
 
-### ElevenLabs (voiceover)
+### Voiceover: pick an engine per channel (Edit channel → Voice engine)
 
-Create a key at [elevenlabs.io](https://elevenlabs.io) (profile → API Keys) and set `ELEVENLABS_API_KEY`. Choose each channel's narrator voice under **Edit channel**.
+- **Kokoro**: free and unlimited, runs on your computer (open-source model, English). No key needed. The first use downloads the model (about 90 MB) into `data/models`.
+- **Gemini**: very natural, and follows a narration style you describe. Create a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) and set `GEMINI_API_KEY`. The free tier allows only a few voice requests per day; turn on billing for regular use.
+- **ElevenLabs**: the most human voice, paid by monthly characters. Create a key at [elevenlabs.io](https://elevenlabs.io) (profile → API Keys, allow Text to Speech, Voices read and User read) and set `ELEVENLABS_API_KEY`.
+
+ElevenLabs returns exact word timings for captions. For Kokoro and Gemini the app estimates them from the text, which stays close because scenes are 1-2 sentences.
 
 ### Pexels (stock footage, free)
 

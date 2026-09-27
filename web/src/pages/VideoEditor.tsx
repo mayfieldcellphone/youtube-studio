@@ -299,14 +299,14 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
                   <Wand2 className="h-4 w-4 text-red-600" /> Make it automatically
                 </p>
                 <p className="muted mt-1">
-                  AI voiceover (ElevenLabs), matching stock footage (Pexels) and captions, edited into a{" "}
+                  AI voiceover (the channel's voice engine), matching stock footage (Pexels) and captions, edited into a{" "}
                   {video.format === "short" ? "vertical Short" : "horizontal video"}. Takes a few minutes.
                 </p>
               </div>
               {!renderRunning && (
                 <button
                   className="btn-primary"
-                  disabled={!!busy || !video.script.trim() || !status.voice || !status.footage}
+                  disabled={!!busy || !video.script.trim() || !status.footage}
                   onClick={() => {
                     if (!video.videoFile || confirm("Replace the current video file with a newly made one?")) ai("render", () => api.render(video.id));
                   }}
@@ -316,9 +316,9 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
                 </button>
               )}
             </div>
-            {(!status.voice || !status.footage) && (
+            {!status.footage && (
               <p className="mt-3 text-xs text-amber-700 dark:text-amber-400">
-                Needs your {[!status.voice && "ElevenLabs", !status.footage && "Pexels"].filter(Boolean).join(" and ")} key. See{" "}
+                Needs your Pexels key. See{" "}
                 <a className="underline" href="#/setup">Setup</a>.
               </p>
             )}

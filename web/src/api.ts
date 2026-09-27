@@ -11,7 +11,9 @@ export interface Channel {
   postingDays: number[];
   postingTime: string;
   categoryId: string;
+  voiceEngine?: VoiceEngine;
   voiceId?: string;
+  voiceStyle?: string;
   affiliateLinks?: string;
   look?: "cinematic" | "clean" | "warm";
   musicFile?: FileInfo;
@@ -51,6 +53,8 @@ export interface Video {
   updatedAt: string;
 }
 
+export type VoiceEngine = "elevenlabs" | "gemini" | "kokoro";
+
 export interface Voice {
   id: string;
   name: string;
@@ -61,6 +65,7 @@ export interface Voice {
 export type SettingKey =
   | "ANTHROPIC_API_KEY"
   | "ELEVENLABS_API_KEY"
+  | "GEMINI_API_KEY"
   | "PEXELS_API_KEY"
   | "GOOGLE_CLIENT_ID"
   | "GOOGLE_CLIENT_SECRET"
@@ -74,6 +79,7 @@ export interface Status {
   ai: boolean;
   youtube: boolean;
   voice: boolean;
+  gemini: boolean;
   footage: boolean;
   ffmpeg: boolean;
   redirectUri: string;
@@ -125,7 +131,16 @@ export const api = {
   deleteVideo: (id: string) => request("DELETE", `/api/videos/${id}`),
   research: (id: string) => request<Video>("POST", `/api/videos/${id}/research`),
   render: (id: string) => request<Video>("POST", `/api/videos/${id}/render`),
-  voices: () => request<Voice[]>("GET", "/api/voices"),
+  voices: (engine: VoiceEngine) => request<Voice[]>("GET", `/api/voices?engine=${engine}`),
+  previewVoice: async (choice: { engine: VoiceEngine; voiceId?: string; style?: string }) => {
+    const res = await fetch("/api/voices/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(choice),
+    });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Preview failed.");
+    return URL.createObjectURL(await res.blob());
+  },
   voiceUsage: () => request<{ used: number; limit: number; resetsAt?: string } | null>("GET", "/api/voice/usage"),
   videoUrl: (v: Video) => `/api/videos/${v.id}/video?t=${encodeURIComponent(v.updatedAt)}`,
   generateScript: (id: string) => request<Video>("POST", `/api/videos/${id}/script`),

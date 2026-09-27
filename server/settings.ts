@@ -11,6 +11,7 @@ import { DATA_DIR } from "./db";
 export const SETTING_KEYS = [
   "ANTHROPIC_API_KEY",
   "ELEVENLABS_API_KEY",
+  "GEMINI_API_KEY",
   "PEXELS_API_KEY",
   "GOOGLE_CLIENT_ID",
   "GOOGLE_CLIENT_SECRET",

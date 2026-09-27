@@ -92,8 +92,8 @@ export interface Word {
   end: number;
 }
 
-/** Generates narration and returns word timings (used for captions) and the spoken duration. */
-export async function speak(text: string, voiceId: string, outFile: string) {
+/** ElevenLabs narration with exact word timings (used for captions) and the spoken duration. */
+export async function elevenSpeak(text: string, voiceId: string, outFile: string) {
   const data = await eleven(`/v1/text-to-speech/${voiceId}/with-timestamps?output_format=mp3_44100_128`, {
     method: "POST",
     body: JSON.stringify({

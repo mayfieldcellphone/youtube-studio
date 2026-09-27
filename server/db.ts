@@ -32,8 +32,12 @@ export interface Channel {
   /** "HH:MM" in the browser's local time */
   postingTime: string;
   categoryId: string;
-  /** ElevenLabs voice used for narration */
+  /** Narration engine; unset means the first one that's set up */
+  voiceEngine?: "elevenlabs" | "gemini" | "kokoro";
+  /** Voice within the engine */
   voiceId?: string;
+  /** Gemini only: how the narrator should read, e.g. "slow, suspenseful documentary narrator" */
+  voiceStyle?: string;
   /** Affiliate/product links the AI may add to descriptions, one per line */
   affiliateLinks?: string;
   /** Color grade for automatically made videos */

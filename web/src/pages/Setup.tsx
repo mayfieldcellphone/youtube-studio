@@ -56,7 +56,28 @@ export default function Setup() {
         <p className="mt-2 text-xs text-zinc-500">Used for ideas, web research, scripts, titles, descriptions and tags. You pay per use; a fully researched video typically costs well under $1.</p>
       </Section>
 
-      <Section ok={status.voice} title="2. AI voiceover (ElevenLabs)">
+      <Section title="2. AI voiceover: choose one or more">
+        <p>
+          Each channel picks its voice engine under <b>Edit channel</b>. <b>Kokoro</b> is built in and free with no key, so you can
+          make videos right away. Add Gemini or ElevenLabs below for more natural voices.
+        </p>
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-zinc-600 dark:text-zinc-400">
+          <li><b>Kokoro</b>: free, unlimited, runs on this computer. English only. The first use downloads the voice model (about 90 MB).</li>
+          <li><b>Gemini</b>: very natural, and follows a style you describe. The free tier allows a few voice requests per day; with billing it costs roughly a cent or two per minute of speech.</li>
+          <li><b>ElevenLabs</b>: the most human voice. Paid by characters per month.</li>
+        </ul>
+      </Section>
+
+      <Section ok={status.gemini} title="2a. Gemini voice (Google AI Studio)">
+        <ol className="list-decimal space-y-1.5 pl-5">
+          <li>Go to <Ext href="https://aistudio.google.com/apikey">aistudio.google.com/apikey</Ext> and sign in with your Google account.</li>
+          <li>Click <b>Create API key</b> and copy it. (A Gemini app subscription doesn't include this; the key is separate and free to create.)</li>
+          <li>For regular posting, turn on billing for the key in AI Studio. The free tier runs out after a few voice requests per day.</li>
+        </ol>
+        {field("GEMINI_API_KEY", "Gemini API key", "AIza…")}
+      </Section>
+
+      <Section ok={status.voice} title="2b. ElevenLabs voice (optional)">
         <ol className="list-decimal space-y-1.5 pl-5">
           <li>Sign up at <Ext href="https://elevenlabs.io">elevenlabs.io</Ext>. The free plan is enough to test; the Starter plan (about $5/month) covers several videos a week.</li>
           <li>Click your profile → <b>API Keys</b> → <b>Create API Key</b>. Allow <b>Text to Speech</b>, <b>Voices</b> (read) and <b>User</b> (read), then copy it.</li>

@@ -5,7 +5,8 @@ import { spawn } from "node:child_process";
 import ffmpegPath from "ffmpeg-static";
 import { DATA_DIR, db, UPLOAD_DIR, type VideoLook } from "./db";
 import { planScenes } from "./ai";
-import { DEFAULT_VOICE_ID, download, findFootage, speak, type Footage, type Word } from "./media";
+import { download, findFootage, type Footage, type Word } from "./media";
+import { synthesize, voiceFor } from "./voices";
 
 const FONT_DIR = path.resolve("assets/fonts");
 const FPS = 30;
@@ -66,11 +67,11 @@ async function render(videoId: string) {
     const n = scenes.length;
 
     // 1. Voiceover for each scene (per-scene audio gives exact scene lengths and caption timings).
+    const voice = voiceFor(channel);
     const voices: { file: string; words: Word[]; duration: number }[] = [];
     for (const [i, scene] of scenes.entries()) {
       stage(`Recording voiceover (${i + 1}/${n})`, 6 + (29 * i) / n);
-      const file = path.join(work, `voice-${i}.mp3`);
-      const { words, duration } = await speak(scene.narration, channel.voiceId || DEFAULT_VOICE_ID, file);
+      const { file, words, duration } = await synthesize(scene.narration, voice, path.join(work, `voice-${i}`));
       voices.push({ file, words, duration: Math.max(duration, 0.5) + GAP });
     }
 
@@ -122,7 +123,7 @@ async function render(videoId: string) {
     stage("Mixing audio", 80);
     const voiceParts: string[] = [];
     for (const [i, voice] of voices.entries()) {
-      const out = path.join(work, `voice-${i}.wav`);
+      const out = path.join(work, `narration-${i}.wav`);
       await ffmpeg(["-i", voice.file, "-af", "aresample=44100,apad", "-t", voice.duration.toFixed(3), "-ac", "2", out]);
       voiceParts.push(out);
     }

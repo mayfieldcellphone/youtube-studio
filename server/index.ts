@@ -7,9 +7,10 @@ import cookieParser from "cookie-parser";
 import multer from "multer";
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { db, publicChannel, publicVideo, UPLOAD_DIR, type Video } from "./db";
+import { DATA_DIR, db, publicChannel, publicVideo, UPLOAD_DIR, type Video } from "./db";
 import { aiConfigured, generateIdeas, generateMetadata, generateScript, research } from "./ai";
-import { footageConfigured, listVoices, voiceCharactersLeft, voiceConfigured } from "./media";
+import { footageConfigured, voiceCharactersLeft, voiceConfigured } from "./media";
+import { engineReady, geminiConfigured, listVoices, previewVoice, voiceFor, type VoiceEngine } from "./voices";
 import { ffmpegAvailable, isRendering, recoverInterruptedRenders, startRender } from "./render";
 import { authUrl, completeAuth, redirectUri, syncChannel, uploadAndSchedule, youtubeConfigured } from "./youtube";
 import { describeSettings, loadSettings, saveSettings, SETTING_KEYS } from "./settings";
@@ -54,6 +55,7 @@ app.get("/api/status", (req, res) => {
     ai: aiConfigured(),
     youtube: youtubeConfigured(),
     voice: voiceConfigured(),
+    gemini: geminiConfigured(),
     footage: footageConfigured(),
     ffmpeg: ffmpegAvailable(),
     redirectUri: redirectUri(),
@@ -128,7 +130,9 @@ const channelInput = z.object({
   postingDays: z.array(z.number().int().min(0).max(6)).default([1, 3, 5]),
   postingTime: z.string().regex(/^\d{2}:\d{2}$/).default("17:00"),
   categoryId: z.string().regex(/^\d+$/).default("22"),
+  voiceEngine: z.enum(["elevenlabs", "gemini", "kokoro"]).optional(),
   voiceId: z.string().max(100).optional(),
+  voiceStyle: z.string().max(300).optional(),
   look: z.enum(["cinematic", "clean", "warm"]).optional(),
   affiliateLinks: z.string().max(3000).optional(),
 });
@@ -287,9 +291,20 @@ app.post("/api/videos/:id/metadata", async (req, res) => {
 
 // ---------- Automatic video maker ----------
 
-app.get("/api/voices", async (_req, res) => {
-  if (!voiceConfigured()) return res.json([]);
-  res.json(await listVoices());
+const engineParam = z.enum(["elevenlabs", "gemini", "kokoro"]);
+
+app.get("/api/voices", async (req, res) => {
+  const engine = engineParam.catch("elevenlabs").parse(req.query.engine) as VoiceEngine;
+  res.json(await listVoices(engine));
+});
+
+app.post("/api/voices/preview", async (req, res) => {
+  const voice = z
+    .object({ engine: engineParam, voiceId: z.string().max(100).optional(), style: z.string().max(300).optional() })
+    .parse(req.body);
+  if (!engineReady(voice.engine)) throw new HttpError(400, "Add this voice engine's key on the Setup page first.");
+  const file = await previewVoice(voice, path.join(DATA_DIR, "work", "previews"));
+  res.sendFile(file, () => fs.rm(file, { force: true }, () => {}));
 });
 
 app.get("/api/voice/usage", async (_req, res) => {
@@ -298,16 +313,19 @@ app.get("/api/voice/usage", async (_req, res) => {
 
 app.post("/api/videos/:id/render", async (req, res) => {
   requireAi();
-  if (!voiceConfigured()) throw new HttpError(400, "Add ELEVENLABS_API_KEY to .env to create voiceovers.");
   if (!footageConfigured()) throw new HttpError(400, "Add PEXELS_API_KEY to .env to find stock footage.");
   if (!ffmpegAvailable()) throw new HttpError(500, "FFmpeg is missing. Run npm install again.");
   const video = getVideo(req.params.id);
   if (video.youtubeVideoId) throw new HttpError(400, "This video is already on YouTube.");
   if (!video.script.trim()) throw new HttpError(400, "Write the script first.");
+  const voice = voiceFor(getChannel(video.channelId));
+  if (!engineReady(voice.engine)) {
+    throw new HttpError(400, `Add your ${voice.engine === "gemini" ? "Gemini" : "ElevenLabs"} key on the Setup page, or pick another voice engine under Edit channel.`);
+  }
 
   // Catch a used-up voice quota now, before spending AI calls on a video that can't finish.
   const needed = video.script.replace(/\[[^\]]*\]/g, "").replace(/\s+/g, " ").trim().length;
-  const usage = await voiceCharactersLeft();
+  const usage = voice.engine === "elevenlabs" ? await voiceCharactersLeft() : null;
   if (usage && usage.limit > 0 && usage.limit - usage.used < needed) {
     const left = Math.max(0, usage.limit - usage.used);
     const reset = usage.resetsAt ? ` It resets on ${new Date(usage.resetsAt).toDateString()}.` : "";

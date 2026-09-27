@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, CATEGORIES, DAY_NAMES, type Channel, type Voice } from "../api";
+import { api, CATEGORIES, DAY_NAMES, type Channel, type Voice, type VoiceEngine } from "../api";
 import { navigate, useApp } from "../App";
 import { ErrorBox, PageHeader, Spinner, useAction } from "../components/ui";
 
@@ -44,6 +44,7 @@ const PRESETS = [
     categoryId: "27",
     postingDays: [0, 3, 5],
     look: "cinematic" as const,
+    voiceStyle: "Narrate slowly and suspensefully, like a documentary narrator telling a true mystery, with dramatic pauses",
   },
 ];
 
@@ -55,10 +56,18 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
     existing ? { ...EMPTY, ...existing } : EMPTY,
   );
   const { busy, error, run } = useAction();
+  const preview = useAction();
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  // The engine used when none is chosen: the first one that's set up.
+  const defaultEngine: VoiceEngine = status.voice ? "elevenlabs" : status.gemini ? "gemini" : "kokoro";
+  const engine = form.voiceEngine ?? defaultEngine;
+  const engineReady = engine === "kokoro" || (engine === "gemini" ? status.gemini : status.voice);
 
   useEffect(() => {
-    if (status.voice) api.voices().then(setVoices).catch(() => {});
-  }, [status.voice]);
+    setVoices([]);
+    if (engineReady) api.voices(engine).then(setVoices).catch(() => {});
+  }, [engine, engineReady]);
 
   if (channelId && !existing) return <p className="muted">Channel not found.</p>;
 
@@ -132,20 +141,66 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
             ))}
           </select>
         </Field>
-        <Field label="Narrator voice" hint="Used when the app makes videos automatically. Pick a deep voice for stories, a bright one for tips.">
-          {status.voice ? (
-            <select value={form.voiceId ?? ""} onChange={(e) => set("voiceId", e.target.value)}>
-              <option value="">Default (George, warm storyteller)</option>
-              {voices.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.name}{v.description ? ` (${v.description})` : ""}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <p className="muted">Add your ElevenLabs key on the <a className="underline" href="#/setup">Setup</a> page to choose a voice.</p>
+        <Field label="Voice engine" hint="Used when the app makes videos automatically. You can switch any time.">
+          <select
+            value={engine}
+            onChange={(e) => {
+              setForm((f) => ({ ...f, voiceEngine: e.target.value as VoiceEngine, voiceId: "" }));
+              setPreviewUrl(null);
+            }}
+          >
+            <option value="kokoro">Kokoro: free and unlimited, runs on this computer (English)</option>
+            <option value="gemini">Gemini: very natural, follows a style you describe (cheap; free tier has daily limits)</option>
+            <option value="elevenlabs">ElevenLabs: most human, paid monthly characters</option>
+          </select>
+          {!engineReady && (
+            <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+              Add your {engine === "gemini" ? "Gemini" : "ElevenLabs"} key on the <a className="underline" href="#/setup">Setup</a> page first.
+            </p>
+          )}
+          {engine === "kokoro" && (
+            <p className="mt-1 text-xs text-zinc-500">The first video or preview downloads the voice model once (about 90 MB), so it takes a few extra minutes.</p>
           )}
         </Field>
+        {engineReady && (
+          <Field label="Narrator voice" hint="Pick a deep, calm voice for stories and a bright one for tips. Click Preview to hear it.">
+            <div className="flex flex-wrap gap-2">
+              <select className="min-w-0 flex-1" value={form.voiceId ?? ""} onChange={(e) => { set("voiceId", e.target.value); setPreviewUrl(null); }}>
+                <option value="">
+                  Default ({engine === "elevenlabs" ? "George" : engine === "gemini" ? "Charon" : "Michael"})
+                </option>
+                {voices.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name}{v.description ? ` (${v.description})` : ""}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={!!preview.busy}
+                onClick={() =>
+                  preview.run("preview", async () =>
+                    setPreviewUrl(await api.previewVoice({ engine, voiceId: form.voiceId || undefined, style: form.voiceStyle || undefined })),
+                  )
+                }
+              >
+                {preview.busy && <Spinner />} Preview
+              </button>
+            </div>
+            {previewUrl && <audio className="mt-2 w-full" src={previewUrl} controls autoPlay />}
+            <ErrorBox error={preview.error} />
+          </Field>
+        )}
+        {engine === "gemini" && (
+          <Field label="Narration style" hint="Describe how the narrator should sound. Gemini follows it; the other engines ignore it.">
+            <input
+              value={form.voiceStyle ?? ""}
+              onChange={(e) => set("voiceStyle", e.target.value)}
+              placeholder="e.g. Narrate slowly and suspensefully, like a documentary narrator"
+            />
+          </Field>
+        )}
         <Field label="Video look" hint="The color style of videos the app makes automatically.">
           <select value={form.look ?? "clean"} onChange={(e) => set("look", e.target.value as Channel["look"])}>
             <option value="cinematic">Cinematic: dark and moody, with a vignette (history, mystery, true crime)</option>
