@@ -74,7 +74,7 @@ export default function Setup() {
           <li>Click <b>Create API key</b> and copy it. (A Gemini app subscription doesn't include this; the key is separate and free to create.)</li>
           <li>For regular posting, turn on billing for the key in AI Studio. The free tier runs out after a few voice requests per day.</li>
         </ol>
-        {field("GEMINI_API_KEY", "Gemini API key", "AIza…")}
+        {field("GEMINI_API_KEY", "Gemini API key", "AQ.… or AIza…")}
       </Section>
 
       <Section ok={status.voice} title="2b. ElevenLabs voice (optional)">

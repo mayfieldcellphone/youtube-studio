@@ -39,14 +39,15 @@ function write(data: Record<string, string>) {
 
 const LOOKS_LIKE: [RegExp, string][] = [
   [/^sk-ant-/, "a Claude (Anthropic) key"],
-  [/^AIza/, "a Google / Gemini (AI Studio) key"],
+  // AI Studio keys come in an older "AIza…" form and a newer "AQ.…" form.
+  [/^(AIza|AQ\.)/, "a Google / Gemini (AI Studio) key"],
   [/^sk_[0-9a-f]{20,}/i, "an ElevenLabs key"],
   [/^GOCSPX-/, "a Google Client secret"],
   [/\.apps\.googleusercontent\.com$/, "a Google Client ID"],
 ];
 const EXPECTED: Partial<Record<SettingKey, { pattern: RegExp; name: string; box: string }>> = {
   ANTHROPIC_API_KEY: { pattern: /^sk-ant-/, name: "a Claude (Anthropic) key", box: "1. AI writing (Claude)" },
-  GEMINI_API_KEY: { pattern: /^AIza/, name: "a Google / Gemini (AI Studio) key", box: "2a. Gemini voice" },
+  GEMINI_API_KEY: { pattern: /^(AIza|AQ\.)/, name: "a Google / Gemini (AI Studio) key", box: "2a. Gemini voice" },
   ELEVENLABS_API_KEY: { pattern: /^sk_/, name: "an ElevenLabs key", box: "2b. ElevenLabs voice" },
   GOOGLE_CLIENT_ID: { pattern: /\.apps\.googleusercontent\.com$/, name: "a Google Client ID", box: "4. YouTube (Client ID)" },
   GOOGLE_CLIENT_SECRET: { pattern: /^GOCSPX-/, name: "a Google Client secret", box: "4. YouTube (Client secret)" },
@@ -57,6 +58,10 @@ export function wrongBox(key: SettingKey, value: string) {
   const expected = EXPECTED[key];
   if (!expected || !value || expected.pattern.test(value)) return undefined;
   const actual = LOOKS_LIKE.find(([pattern]) => pattern.test(value))?.[1];
+  // Claude keys always start with sk-ant-, so anything else in that box is a mistake.
+  if (!actual && key === "ANTHROPIC_API_KEY") {
+    return `This isn't a Claude (Anthropic) key: those start with "sk-ant-". Get one at console.anthropic.com → API Keys. (An AI Studio / Gemini key goes in the "2a. Gemini voice" box.)`;
+  }
   if (!actual) return undefined; // Unknown format: let the service itself judge it.
   const home = Object.values(EXPECTED).find((e) => e!.name === actual)?.box;
   return `This looks like ${actual}, not ${expected.name}.${home ? ` Paste it in the "${home}" box instead.` : ""}`;
