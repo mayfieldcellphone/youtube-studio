@@ -4,6 +4,8 @@ import crypto from "node:crypto";
 
 export const DATA_DIR = path.resolve(process.env.DATA_DIR ?? "data");
 export const UPLOAD_DIR = path.join(DATA_DIR, "uploads");
+/** Temporary files while making videos. Online this can point at the server's larger scratch disk. */
+export const WORK_DIR = path.resolve(process.env.WORK_DIR ?? path.join(DATA_DIR, "work"));
 const DB_FILE = path.join(DATA_DIR, "db.json");
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });

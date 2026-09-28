@@ -14,5 +14,6 @@ RUN npm run build
 # Listen for visitors from the internet, and keep all data on the mounted disk (/data).
 ENV HOST=0.0.0.0 \
     DATA_DIR=/data \
+    WORK_DIR=/tmp/studio-work \
     NODE_ENV=production
 CMD ["npm", "start"]

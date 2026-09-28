@@ -7,7 +7,7 @@ import cookieParser from "cookie-parser";
 import multer from "multer";
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { DATA_DIR, db, publicChannel, publicVideo, UPLOAD_DIR, type Video } from "./db";
+import { db, publicChannel, publicVideo, UPLOAD_DIR, WORK_DIR, type Video } from "./db";
 import { aiConfigured, generateIdeas, generateMetadata, generateScript, research } from "./ai";
 import { footageConfigured, voiceCharactersLeft, voiceConfigured } from "./media";
 import { engineReady, geminiConfigured, listVoices, previewVoice, voiceFor, type VoiceEngine } from "./voices";
@@ -169,14 +169,14 @@ const channelInput = z.object({
   name: z.string().trim().min(1).max(100),
   niche: z.string().trim().min(1).max(500),
   audience: z.string().trim().max(500).default(""),
-  tone: z.string().trim().max(200).default(""),
+  tone: z.string().trim().max(500).default(""),
   language: z.string().trim().max(50).default("English"),
   postingDays: z.array(z.number().int().min(0).max(6)).default([1, 3, 5]),
   postingTime: z.string().regex(/^\d{2}:\d{2}$/).default("17:00"),
   categoryId: z.string().regex(/^\d+$/).default("22"),
   voiceEngine: z.enum(["elevenlabs", "gemini", "kokoro"]).optional(),
   voiceId: z.string().max(100).optional(),
-  voiceStyle: z.string().max(300).optional(),
+  voiceStyle: z.string().max(600).optional(),
   look: z.enum(["cinematic", "clean", "warm"]).optional(),
   aiFootage: z.enum(["off", "hook", "key", "all"]).optional(),
   aiQuality: z.enum(["fast", "best"]).optional(),
@@ -352,7 +352,7 @@ app.post("/api/voices/preview", async (req, res) => {
     .object({ engine: engineParam, voiceId: z.string().max(100).optional(), style: z.string().max(300).optional() })
     .parse(req.body);
   if (!engineReady(voice.engine)) throw new HttpError(400, "Add this voice engine's key on the Setup page first.");
-  const file = await previewVoice(voice, path.join(DATA_DIR, "work", "previews"));
+  const file = await previewVoice(voice, path.join(WORK_DIR, "previews"));
   res.sendFile(file, () => fs.rm(file, { force: true }, () => {}));
 });
 

@@ -3,7 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import ffmpegPath from "ffmpeg-static";
-import { DATA_DIR, db, UPLOAD_DIR, type VideoLook } from "./db";
+import { db, UPLOAD_DIR, WORK_DIR, type VideoLook } from "./db";
 import { planScenes } from "./ai";
 import { download, findFootage, type Footage, type Word } from "./media";
 import { synthesizeScenes, voiceFor } from "./voices";
@@ -58,7 +58,7 @@ async function render(videoId: string) {
 
   const portrait = video.format === "short";
   const [W, H] = portrait ? [1080, 1920] : [1920, 1080];
-  const work = path.join(DATA_DIR, "work", video.id);
+  const work = path.join(WORK_DIR, video.id);
   fs.rmSync(work, { recursive: true, force: true });
   fs.mkdirSync(work, { recursive: true });
 
@@ -195,7 +195,8 @@ async function render(videoId: string) {
         `[1:a]asplit=2[n1][n2];[m][n1]sidechaincompress=threshold=0.02:ratio=10:attack=15:release=400[duck];` +
         `[n2][duck]amix=inputs=2:duration=first:normalize=0[a]`
       : `[1:a]anull[a]`;
-    const output = path.join(UPLOAD_DIR, `${crypto.randomUUID()}.mp4`);
+    // Rendered in the work folder, then moved: "+faststart" briefly needs twice the file size.
+    const rendered = path.join(work, "final.mp4");
     await ffmpeg(
       [
         "-f", "concat", "-safe", "0", "-i", "shots.txt",
@@ -208,12 +209,14 @@ async function render(videoId: string) {
         "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-maxrate", "10M", "-bufsize", "20M", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "192k",
         "-movflags", "+faststart",
-        output,
+        "final.mp4",
       ],
       (seconds) => stage("Adding captions and finishing", 82 + Math.min(17, (17 * seconds) / total)),
       work,
     );
 
+    const output = path.join(UPLOAD_DIR, `${crypto.randomUUID()}.mp4`);
+    moveFile(rendered, output);
     const size = fs.statSync(output).size;
     const previous = video.videoFile;
     db.updateVideo(videoId, {
@@ -363,17 +366,39 @@ function assTime(seconds: number) {
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "video";
 
+/** Moves a file, copying when the two folders are on different disks. */
+function moveFile(from: string, to: string) {
+  try {
+    fs.renameSync(from, to);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EXDEV") throw err;
+    fs.copyFileSync(from, to);
+    fs.rmSync(from, { force: true });
+  }
+}
+
+// Encoder statistics and progress lines FFmpeg prints on every run; they hide the real error.
+const FFMPEG_NOISE = /^\[(libx264|aac) @|^(frame|size)=|^\s*$|^video:\d/;
+
 function ffmpeg(args: string[], onProgress?: (seconds: number) => void, cwd?: string) {
   return new Promise<void>((resolve, reject) => {
-    const proc = spawn(ffmpegPath!, ["-y", "-hide_banner", "-nostdin", ...args], { cwd });
+    const proc = spawn(ffmpegPath!, ["-y", "-hide_banner", "-nostdin", "-loglevel", "error", "-stats", ...args], { cwd });
     let log = "";
     proc.stderr.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
-      log = (log + text).slice(-4000);
+      log = (log + text).slice(-20000);
       const match = onProgress && /time=(\d+):(\d+):([\d.]+)/.exec(text);
       if (match) onProgress!(Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]));
     });
     proc.on("error", reject);
-    proc.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`Video editing failed:\n${log.slice(-800)}`))));
+    proc.on("close", (code) => {
+      if (code === 0) return resolve();
+      const lines = log.split(/[\r\n]+/).filter((line) => !FFMPEG_NOISE.test(line));
+      console.error(`FFmpeg failed (exit ${code}):\n${lines.slice(-40).join("\n")}`);
+      if (/No space left on device/i.test(log)) {
+        return reject(new Error("The app's storage is full, so the video couldn't be saved. Delete videos you no longer need, or give the app more storage (on Railway: upgrade to Hobby for 5 GB)."));
+      }
+      reject(new Error(`Video editing failed:\n${lines.slice(-8).join("\n").slice(-800)}`));
+    });
   });
 }
