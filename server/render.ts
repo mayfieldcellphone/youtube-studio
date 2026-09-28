@@ -8,6 +8,7 @@ import { planScenes } from "./ai";
 import { download, findFootage, type Footage, type Word } from "./media";
 import { synthesizeScenes, voiceFor } from "./voices";
 import { CLIP_SECONDS, makeClips } from "./veo";
+import { DEFAULT_PICTURE_STYLES, makePictures } from "./images";
 
 const FONT_DIR = path.resolve("assets/fonts");
 const FPS = 30;
@@ -85,7 +86,7 @@ async function render(videoId: string) {
     //    cumulative times so the picture never drifts from the narration. Scenes chosen for
     //    AI footage open with one Veo clip (up to 8 s); any remaining time uses stock shots.
     const aiScenes = pickAiScenes(channel.aiFootage ?? "off", scenes);
-    const shots: { query: string; fallback: string; frames: number; aiPrompt?: string }[] = [];
+    const shots: { query: string; fallback: string; frames: number; picture: string; aiPrompt?: string }[] = [];
     let elapsed = 0;
     const addShot = (seconds: number, shot: Omit<(typeof shots)[number], "frames">) => {
       const frames = Math.round((elapsed + seconds) * FPS) - Math.round(elapsed * FPS);
@@ -94,17 +95,20 @@ async function render(videoId: string) {
     };
     for (const [i, scene] of scenes.entries()) {
       const duration = voices[i].duration;
-      let queries = scene.shots;
+      let planned = scene.shots;
       let remaining = duration;
       if (aiScenes.has(i)) {
         // A clip slightly shorter than the scene just loops for the last moment.
         const aiSeconds = duration - CLIP_SECONDS > 1.5 ? CLIP_SECONDS : duration;
-        addShot(aiSeconds, { query: scene.shots[0], fallback: scene.fallbackQuery, aiPrompt: scene.aiPrompt });
+        const first = scene.shots[0];
+        addShot(aiSeconds, { query: first.search, picture: first.picture, fallback: scene.fallbackQuery, aiPrompt: scene.aiPrompt });
         remaining -= aiSeconds;
-        queries = scene.shots.slice(1).length ? scene.shots.slice(1) : scene.shots.slice(0, 1);
+        planned = scene.shots.slice(1).length ? scene.shots.slice(1) : scene.shots.slice(0, 1);
       }
       if (remaining <= 0.01) continue;
-      for (const query of queries) addShot(remaining / queries.length, { query, fallback: scene.fallbackQuery });
+      for (const shot of planned) {
+        addShot(remaining / planned.length, { query: shot.search, picture: shot.picture, fallback: scene.fallbackQuery });
+      }
     }
     const total = elapsed;
 
@@ -117,7 +121,7 @@ async function render(videoId: string) {
       stage(label(0), 35);
       const requests = aiShots.map((i) => ({ prompt: shots[i].aiPrompt!, outFile: path.join(work, `ai-${i}.mp4`) }));
       const results = await makeClips(requests, channel.aiQuality ?? "fast", portrait, (done) =>
-        stage(label(done), 35 + (12 * done) / aiShots.length),
+        stage(label(done), 35 + (6 * done) / aiShots.length),
       );
       const failures = new Map<string, number>();
       results.forEach((result, k) => {
@@ -129,13 +133,41 @@ async function render(videoId: string) {
       }
     }
 
-    // 3b. Stock footage for every other shot, never reusing a clip within the video.
+    // 3b. AI pictures for the other shots, if the channel uses them; failures use stock footage.
+    const pictureFiles = new Map<number, string>();
+    if (channel.visuals === "pictures") {
+      const wanted = shots.flatMap((s, i) => (aiFiles.has(i) ? [] : [i]));
+      const label = (done: number) => `Drawing AI pictures (${done}/${wanted.length})`;
+      stage(label(0), 41);
+      const style = channel.pictureStyle?.trim() || DEFAULT_PICTURE_STYLES[channel.look ?? "clean"];
+      const results = await makePictures(
+        wanted.map((i) => ({ prompt: shots[i].picture, outBase: path.join(work, `picture-${i}`) })),
+        style,
+        portrait,
+        (done) => stage(label(done), 41 + (6 * done) / wanted.length),
+      );
+      const failures = new Map<string, number>();
+      results.forEach((result, k) => {
+        if (typeof result !== "string") pictureFiles.set(wanted[k], result.file);
+        else failures.set(result, (failures.get(result) ?? 0) + 1);
+      });
+      for (const [reason, count] of failures) {
+        notes.push(`${count} AI picture${count > 1 ? "s" : ""} used stock footage instead. ${reason}`);
+      }
+    }
+
+    // 3c. Stock footage for every other shot, never reusing a clip within the video.
     const used = new Set<string>();
     const visuals: ((Footage & { file: string }) | null)[] = [];
     for (const [i, shot] of shots.entries()) {
       const aiFile = aiFiles.get(i);
       if (aiFile) {
         visuals.push({ id: `ai-${i}`, kind: "video", url: "", file: aiFile });
+        continue;
+      }
+      const pictureFile = pictureFiles.get(i);
+      if (pictureFile) {
+        visuals.push({ id: `picture-${i}`, kind: "photo", url: "", file: pictureFile });
         continue;
       }
       stage(`Finding footage (${i + 1}/${shots.length})`, 47 + (8 * i) / shots.length);
@@ -222,7 +254,8 @@ async function render(videoId: string) {
     db.updateVideo(videoId, {
       videoFile: { path: output, name: `${slug(video.title)}.mp4`, size, mimeType: "video/mp4" },
       status: ["idea", "scripted"].includes(video.status) ? "ready" : video.status,
-      aiFootageUsed: aiFiles.size > 0,
+      // Realistic AI video and pictures both need YouTube's altered/synthetic content label.
+      aiFootageUsed: aiFiles.size > 0 || pictureFiles.size > 0,
       render: { ...video.render!, stage: "Done", progress: 100, notes, finishedAt: new Date().toISOString() },
     });
     if (previous) fs.rm(previous.path, { force: true }, () => {});
@@ -277,13 +310,21 @@ function shotArgs(
       `[0:v]fps=${FPS},scale=${bw}:${bh}:force_original_aspect_ratio=increase,crop=${bw}:${bh},` +
       `crop=${W}:${H}:x='(iw-ow)*min(1,${progress})':y='(ih-oh)/2'`;
   } else if (visual?.kind === "photo") {
-    // Slow zoom (in or out) so still photos don't look frozen.
+    // Slow camera moves so stills don't look frozen, rotating between zoom in, pan right,
+    // zoom out and pan left. The picture is enlarged first so the movement stays smooth.
     const [bw, bh] = [Math.round(W * 1.5), Math.round(H * 1.5)];
-    const zoom = forward ? `min(1+0.0009*on,1.25)` : `max(1.25-0.0009*on,1)`;
+    const t = `min(on/${Math.max(frames - 1, 1)},1)`;
+    const moves = [
+      { z: `1+0.18*${t}`, x: "iw/2-(iw/zoom/2)" },
+      { z: "1.15", x: `(iw-iw/zoom)*${t}` },
+      { z: `1.18-0.18*${t}`, x: "iw/2-(iw/zoom/2)" },
+      { z: "1.15", x: `(iw-iw/zoom)*(1-${t})` },
+    ];
+    const move = moves[index % moves.length];
     input = ["-loop", "1", "-i", visual.file];
     video =
       `[0:v]scale=${bw}:${bh}:force_original_aspect_ratio=increase,crop=${bw}:${bh},` +
-      `zoompan=z='${zoom}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${W}x${H}:fps=${FPS}`;
+      `zoompan=z='${move.z}':x='${move.x}':y='ih/2-(ih/zoom/2)':d=${frames}:s=${W}x${H}:fps=${FPS}`;
   } else {
     input = ["-f", "lavfi", "-i", `color=c=0x111111:s=${W}x${H}:r=${FPS}`];
     video = "[0:v]null";

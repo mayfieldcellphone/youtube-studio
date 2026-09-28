@@ -18,6 +18,8 @@ export interface Channel {
   voiceStyle?: string;
   affiliateLinks?: string;
   look?: "cinematic" | "clean" | "warm";
+  visuals?: "stock" | "pictures";
+  pictureStyle?: string;
   aiFootage?: "off" | "hook" | "key" | "all";
   aiQuality?: "fast" | "best";
   musicFile?: FileInfo;
@@ -194,6 +196,19 @@ export function aiFootageEstimate(channel: Channel, format: VideoFormat) {
   const shots = mode === "hook" ? 1 : mode === "key" ? 3 : format === "short" ? 7 : 12;
   const cost = shots * 8 * VEO_PRICE_PER_SECOND[channel.aiQuality ?? "fast"];
   return { shots, cost };
+}
+
+/** Rough Gemini price per AI picture, for estimates only. */
+export const PRICE_PER_PICTURE = 0.04;
+
+/** About how many AI pictures a video will need, from its script length (null when the channel uses stock footage). */
+export function picturesEstimate(channel: Channel, video: Pick<Video, "format" | "script">) {
+  if (channel.visuals !== "pictures") return null;
+  const spoken = video.script.replace(/\[[^\]]*\]/g, " ");
+  const words = spoken.split(/\s+/).filter(Boolean).length;
+  const seconds = words / 2.5 || (video.format === "short" ? 50 : 600);
+  const pictures = Math.ceil(seconds / (video.format === "short" ? 2.5 : 6));
+  return { pictures, cost: pictures * PRICE_PER_PICTURE };
 }
 
 export const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];

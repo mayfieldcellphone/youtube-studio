@@ -17,7 +17,7 @@ export const CLIP_SECONDS = 8;
 
 const key = () => process.env.GEMINI_API_KEY ?? "";
 
-async function google(path: string, init?: RequestInit) {
+export async function google(path: string, init?: RequestInit) {
   const res = await fetch(`${API}${path}`, {
     ...init,
     headers: { "Content-Type": "application/json", "x-goog-api-key": key(), ...init?.headers },

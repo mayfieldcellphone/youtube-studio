@@ -4,10 +4,10 @@ Plan, write and schedule videos for several YouTube channels from one place.
 
 **The flow for each video** (no camera or microphone needed):
 
-1. **Ideas.** The AI suggests videos people search for, tailored to each channel.
+1. **Ideas.** The AI first searches the web for what's getting attention in the channel's niche right now (news, anniversaries, topics that are overdone), then suggests videos tailored to each channel.
 2. **Research.** The AI searches the web and collects facts, marked confirmed, disputed or theory, with source links.
 3. **Script.** The AI writes a hook-first script from the research, then a second "tough editor" pass rewrites it to cut clichés, sharpen the hook and add cliffhangers. You review and edit it.
-4. **Make the video.** One click produces a voiceover (Kokoro free/local, Gemini, or ElevenLabs, chosen per channel), a new Pexels shot every few seconds with slow camera movement, a color grade per channel (cinematic, clean or warm), word-by-word captions (the spoken word is highlighted gold in Shorts) and optional background music that ducks under the voice, rendered with FFmpeg as a vertical Short or a horizontal video. You watch the preview. You can also upload a video made anywhere else.
+4. **Make the video.** One click produces a voiceover (Kokoro free/local, Gemini, or ElevenLabs, chosen per channel), a new shot every few seconds with slow camera movement (Pexels stock footage, or an AI picture drawn for each line of the story), a color grade per channel (cinematic, clean or warm), word-by-word captions (the spoken word is highlighted gold in Shorts) and optional background music that ducks under the voice, rendered with FFmpeg as a vertical Short or a horizontal video. You watch the preview. You can also upload a video made anywhere else.
 5. **Title, description and tags.** The AI writes 5 title options, an SEO description, tags, disclaimers and your affiliate links.
 6. **Schedule.** The app uploads the video to YouTube with a publish time, and YouTube publishes it even if this app is offline.
 7. **Grow.** Channel and per-video views, likes and comments show on the dashboard.
@@ -72,6 +72,10 @@ Create a key at [console.anthropic.com](https://console.anthropic.com) and set `
 - **ElevenLabs**: the most human voice, paid by monthly characters. Create a key at [elevenlabs.io](https://elevenlabs.io) (profile → API Keys, allow Text to Speech, Voices read and User read) and set `ELEVENLABS_API_KEY`.
 
 ElevenLabs returns exact word timings for captions. For Kokoro and Gemini the app estimates them from the text, which stays close because scenes are 1-2 sentences.
+
+### AI pictures (optional, Edit channel → Visuals)
+
+Instead of stock footage, the app can draw a picture for every shot with Gemini's image model, using the same Gemini key (billing required). Each picture shows what the narrator is saying at that moment, in the right era and place, and the video maker moves slowly across it. Roughly $0.04 per picture: about $0.70 for a Short and $4 for a 10-minute video. Pictures Gemini refuses use stock footage instead, with a note. Videos with AI pictures are marked as altered/synthetic content when uploaded.
 
 ### AI footage with Google Veo (optional, Edit channel → AI footage)
 

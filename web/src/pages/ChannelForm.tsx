@@ -44,6 +44,7 @@ const PRESETS = [
     categoryId: "27",
     postingDays: [0, 3, 5],
     look: "cinematic" as const,
+    visuals: "pictures" as const,
     voiceStyle: "Narrate slowly and suspensefully, like a documentary narrator telling a true mystery, with dramatic pauses",
   },
 ];
@@ -222,6 +223,33 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
             <option value="warm">Warm: friendly and golden (money, lifestyle)</option>
           </select>
         </Field>
+        <Field
+          label="Visuals"
+          hint="What fills the screen while the narrator speaks. AI pictures show the actual story (the right era, place and people), which stock footage can't. Uses your Gemini key with billing. If a picture fails, stock footage is used for it."
+        >
+          <select value={form.visuals ?? "stock"} onChange={(e) => set("visuals", e.target.value as Channel["visuals"])}>
+            <option value="stock">Stock footage (free, from Pexels)</option>
+            <option value="pictures">AI pictures for every shot (about $0.70 per Short, $4 per 10-minute video)</option>
+          </select>
+          {form.visuals === "pictures" && !status.gemini && (
+            <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+              Add your Gemini key on the <a className="underline" href="#/setup">Setup</a> page first.
+            </p>
+          )}
+        </Field>
+        {form.visuals === "pictures" && (
+          <Field
+            label="Picture style (optional)"
+            hint="How every picture should look. Leave empty for a style that matches the video look (for Cinematic: dark, realistic film stills with period details)."
+          >
+            <textarea
+              rows={2}
+              value={form.pictureStyle ?? ""}
+              placeholder="e.g. Oil painting in the style of 19th-century realism, candlelit, dark background"
+              onChange={(e) => set("pictureStyle", e.target.value)}
+            />
+          </Field>
+        )}
         <Field
           label="AI footage (Google Veo)"
           hint="Custom AI-made shots for the moments that matter, instead of stock footage. Uses your Gemini key with billing. If an AI shot fails, stock footage is used for it."

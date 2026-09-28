@@ -85,15 +85,17 @@ export interface Idea {
 }
 
 export async function generateIdeas(channel: Channel, count: number, existingTitles: string[], focus?: string) {
+  const trends = await scanTrends(channel, focus);
   const prompt = `${channelBrief(channel)}
-
+${trends ? `\nWhat is getting attention right now (from a web search today):\n${trends}\n` : ""}
 Come up with ${count} new video ideas for this channel. Mix YouTube Shorts and long-form videos (about 2 Shorts for every long video).
 What makes an idea strong:
 - A proven topic: people already search for it or it has gone viral for other channels, but this idea has a fresh angle.
 - One specific, surprising detail at its core (a name, number, object, date or twist). "The lighthouse keepers who vanished and left dinner on the table" beats "Mysterious disappearances".
 - A curiosity gap the title opens and the video pays off honestly. No clickbait the video can't deliver.
 - Strong emotion: awe, dread, outrage, disbelief, or "wait, that's real?".
-- Can be made with narration and stock footage or photos (no filming required).
+- Can be made with narration and stock footage or AI pictures (no filming required).
+- Prefer the timely and untold opportunities from the web search above; skip topics it lists as overdone unless the angle is genuinely new.
 ${focus ? `Focus on: ${focus}\n` : ""}${
     existingTitles.length
       ? `Do not repeat these existing videos:\n${existingTitles.map((t) => `- ${t}`).join("\n")}\n`
@@ -108,31 +110,15 @@ ${focus ? `Focus on: ${focus}\n` : ""}${
         hook: str("The exact first sentence the narrator says: the most surprising specific detail, no scene-setting"),
         format: { type: "string", enum: ["short", "long"] },
         keyword: str("Main search phrase this video should rank for"),
-        angle: str("One sentence: what makes this video different or worth watching"),
+        angle: str("One sentence: what makes this video different, and why people want it now"),
       }),
     },
   }));
   return result.ideas.slice(0, count);
 }
 
-/**
- * Researches a video topic on the web and returns notes plus the sources used,
- * so scripts are built on checked facts instead of the model's memory.
- */
-export async function research(channel: Channel, video: Video): Promise<Omit<Research, "createdAt">> {
-  const prompt = `${channelBrief(channel)}
-
-${videoBrief(video)}
-
-Research this video topic on the web so a scriptwriter can write an accurate, gripping script.
-Write research notes in plain text (no URLs; sources are listed separately):
-- KEY FACTS: the most important facts. Start each line with [Confirmed], [Disputed] or [Theory].
-- TIMELINE: dates and events in order, if the topic has one.
-- SURPRISING DETAILS: 3-6 details most viewers won't know. These make the best hooks.
-- OPEN QUESTIONS: what is still unknown or debated.
-- CAUTION: anything that must not be stated as fact (e.g. accusations against real people who were never convicted).
-Use reliable sources: official records, major news outlets, museums, universities, encyclopedias. Keep it under 900 words.`;
-
+/** Lets Claude search the web, then returns its final written answer and the sources it used. */
+async function searchWeb(prompt: string, maxSearches: number): Promise<Omit<Research, "createdAt">> {
   // Web search runs on Anthropic's servers; a long search can pause, and is resumed by
   // sending back everything the model produced so far.
   const content: Anthropic.Beta.BetaContentBlock[] = [];
@@ -146,7 +132,7 @@ Use reliable sources: official records, major news outlets, museums, universitie
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
       system: SYSTEM,
-      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 8 }],
+      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: maxSearches }],
       messages,
     });
     content.push(...response.content);
@@ -178,13 +164,62 @@ Use reliable sources: official records, major news outlets, museums, universitie
   return { notes, sources };
 }
 
+/**
+ * Researches a video topic on the web and returns notes plus the sources used,
+ * so scripts are built on checked facts instead of the model's memory.
+ */
+export function research(channel: Channel, video: Video) {
+  return searchWeb(
+    `${channelBrief(channel)}
+
+${videoBrief(video)}
+
+Research this video topic on the web so a scriptwriter can write an accurate, gripping script.
+Write research notes in plain text (no URLs; sources are listed separately):
+- KEY FACTS: the most important facts. Start each line with [Confirmed], [Disputed] or [Theory].
+- TIMELINE: dates and events in order, if the topic has one.
+- SURPRISING DETAILS: 3-6 details most viewers won't know. These make the best hooks.
+- HUMAN STORY: the people involved, what they wanted, feared or lost; quotes from records or witnesses if reliable.
+- OPEN QUESTIONS: what is still unknown or debated.
+- CAUTION: anything that must not be stated as fact (e.g. accusations against real people who were never convicted).
+Use reliable sources: official records, major news outlets, museums, universities, encyclopedias. Keep it under 900 words.`,
+    8,
+  );
+}
+
+/**
+ * Scans the web for what is getting attention in the channel's niche right now, so ideas
+ * come from real demand instead of the model's memory. Returns undefined if the scan fails.
+ */
+async function scanTrends(channel: Channel, focus?: string) {
+  const today = new Date().toISOString().slice(0, 10);
+  try {
+    const { notes } = await searchWeb(
+      `${channelBrief(channel)}
+${focus ? `Focus: ${focus}\n` : ""}
+Today is ${today}. Search the web to find video topics for this channel that people want to watch right now. Look for:
+- Recent news in the niche: new discoveries, reopened cases, anniversaries in the next 2 months, new documentaries, books or court rulings.
+- Topics getting a lot of views on YouTube and social media lately in this niche, and which angles are already overdone.
+- Lesser-known stories with a strong, specific hook that big channels haven't covered well.
+Write plain-text notes: 12-20 topic opportunities, one per line, each with the specific hook and why it would get views now (timely, proven demand, or untold). Then list 5 topics that are overdone and should be avoided unless there is a genuinely new angle. Under 700 words, no URLs.`,
+      6,
+    );
+    return notes;
+  } catch (err) {
+    console.error(`Trend scan failed, writing ideas without it: ${(err as Error).message}`);
+    return undefined;
+  }
+}
+
 /** Techniques that keep viewers watching; shared by the writer and the editor pass. */
 function scriptCraft(video: Video) {
   const shape =
     video.format === "short"
       ? `SHORT (vertical, 35-55 seconds, about 110-140 spoken words):
-- Line 1 is the hook: the single most surprising, specific detail, stated in under 12 words. No scene-setting, no "Did you know", no question as the opener.
+- Line 1 is the hook: the single most surprising, specific detail, stated in under 12 words. It must make sense instantly to someone who knows nothing about the story, and open a question they need answered. No scene-setting, no "Did you know", no question as the opener.
+- Follow ONE thread. A Short has room for one mystery and one payoff; cut side details, however interesting.
 - Every following sentence adds new information or raises the stakes. Cut anything that repeats or explains the obvious.
+- Halfway through, re-hook with a line that raises a new question ("But the note in his pocket was stranger.").
 - Build to one twist or reveal near the end.
 - The last line should connect back to the first so the Short loops smoothly. No "subscribe for more" (a 3-word CTA at most, or none).`
       : `LONG VIDEO (8-11 minutes, about 1,300-1,700 spoken words):
@@ -202,6 +237,9 @@ VOICE AND STYLE (this is narration for a voiceover, so write for the ear):
 - Concrete and sensory: names, places, dates, numbers, what it looked, sounded and felt like. Show, don't summarise.
 - Use present tense for dramatic moments ("It's 2 a.m. The radio goes silent.").
 - Occasionally speak to the viewer as "you" to pull them in.
+- Easy to follow by ear, because viewers can't rewind: at most 3 names and 3 numbers or dates in a Short (6 of each in a long video). Round or drop the rest ("in 1948", not "on the first of December 1948"; "a scientist", not his full name, unless the name matters).
+- Make people care: give the viewer a person to feel for (what they lost, feared or wanted) and say what was at stake. A list of facts, however accurate, is dull.
+- End on the strongest beat: the most shocking, ironic or unsettling fact, or a question that lingers. Never let the energy drop at the end (no "the case remains open" as a flat final line).
 - Create tension with open questions, contrasts and reveals, not with adjectives.
 - Never use these clichés: "in this video", "let's dive in", "buckle up", "without further ado", "little did they know", "shrouded in mystery", "the rest is history", "imagine a world", "delve", "tapestry", "hey guys", "welcome back".
 - No filler, no rhetorical question chains, no moralising at the end.
@@ -234,7 +272,8 @@ You are the channel's toughest script editor. Here is a draft:
 
 ${draft.script}
 
-First, list the biggest problems briefly: weak hook, slow or generic lines, clichés, vague statements, missing tension, facts not supported by the research, lines that are hard to say aloud.
+First, list the biggest problems briefly: a hook that needs context to understand, slow or generic lines, clichés, vague statements, too many names, dates and numbers to follow by ear, no person to care about, missing tension or re-hook, a flat or anticlimactic ending, facts not supported by the research, lines that are hard to say aloud.
+Judge it as a viewer scrolling at midnight: would they stop at line 1, and still be there at the end?
 Then rewrite the whole script to fix them. Keep every fact accurate, keep it the right length, and make every line earn its place.
 
 The standard it must meet:
@@ -279,13 +318,23 @@ export interface Scene {
   aiPrompt: string;
   /** The biggest reveal or emotional peak of the video. */
   keyMoment: boolean;
-  /** One stock-footage search per shot; the scene's time is split between them. */
-  shots: string[];
+  /** The scene's shots; its time is split between them. */
+  shots: Shot[];
   fallbackQuery: string;
 }
 
-/** Splits a script into narrated scenes, each with stock-footage search terms. */
+export interface Shot {
+  /** Stock footage search */
+  search: string;
+  /** Description for an AI picture of this exact moment */
+  picture: string;
+}
+
+/** Splits a script into narrated scenes, each with its shots (stock searches and AI picture descriptions). */
 export async function planScenes(channel: Channel, video: Video) {
+  const pictures = channel.visuals === "pictures";
+  // AI pictures cost per picture, so long videos hold each one a little longer.
+  const pace = video.format === "short" ? "2-3" : pictures ? "5-7" : "3-5";
   const prompt = `${channelBrief(channel)}
 
 Script:
@@ -294,10 +343,10 @@ ${video.script}
 Turn this script into scenes for an automatically edited ${video.format === "short" ? "vertical YouTube Short" : "horizontal YouTube video"}.
 - "narration": the exact words the narrator says in this scene, copied from the script in order. Remove anything in [square brackets] and any speaker labels. Together, the scenes must contain the whole spoken script.
 - Keep each scene to 1-2 sentences.
-- "shots": the visuals for the scene, one per ${video.format === "short" ? "2-3" : "3-5"} seconds of speech (1-3 shots per scene), so the picture changes often like a real edit.
-  Each shot is 2-5 English words to search a stock video library (Pexels). Describe something filmable, concrete and atmospheric ("candle flickering in dark room", "fog rolling over pine forest", "hands turning old book pages"), not abstract ideas or names of real people.
-  Match the mood and era of the story: for historical stories prefer old, timeless or vintage-looking subjects (ruins, candles, old documents, stone, fog, black and white) and avoid modern cars, phones or people in modern clothes.
-  Vary the shots: mix wide establishing shots, close-up details and moody textures. Don't repeat the same subject.
+- "shots": the visuals for the scene, one per ${pace} seconds of speech (1-3 shots per scene), so the picture changes often like a real edit. Each shot has:
+  - "search": 2-5 English words to search a stock video library (Pexels). Something filmable, concrete and atmospheric ("candle flickering in dark room", "fog rolling over pine forest", "hands turning old book pages"), not abstract ideas or names of real people. For historical stories prefer old, timeless or vintage-looking subjects and avoid modern cars, phones or modern clothes.
+  - "picture": a description for an AI image generator showing exactly what the narrator is saying at that moment, in English, 25-50 words. Name the concrete subject, setting, era and place, clothing, time of day, lighting and camera framing (wide establishing shot, close-up of an object, over-the-shoulder, aerial). Be specific to the story ("Nine young hikers in 1950s wool coats and fur hats pitch a canvas tent on a bare snowy slope in the Ural Mountains at dusk, wide shot, wind blowing snow"), not generic ("a mountain"). Depict real historical people only as anonymous figures from behind or at a distance, never as recognizable portraits; no gore or dead bodies; no text.
+  Vary the shots like a film editor: alternate wide shots, medium shots and close-up details (hands, objects, documents, footprints). Don't repeat the same subject twice in a row.
 - "fallbackQuery": a broad 1-2 word search in case a shot finds nothing ("forest", "old paper").
 - "aiPrompt": one vivid shot description for an AI video generator, in English, 30-60 words: the subject, setting and era, lighting, camera movement and mood, like a film director's shot note ("Slow dolly toward a stone lighthouse on a storm-lashed Scottish cliff, 1900, grey dawn light, waves exploding below, cinematic, desaturated, tense"). It must match the narration. No text, captions or logos; no real, named people (describe anonymous figures instead); no gore.
 - "keyMoment": true for the 1-2 scenes that hold the biggest reveal or emotional peak; false for all others.`;
@@ -307,7 +356,10 @@ Turn this script into scenes for an automatically edited ${video.format === "sho
       type: "array",
       items: obj({
         narration: str("Spoken words for this scene"),
-        shots: { type: "array", items: str("Stock footage search for one shot") },
+        shots: {
+          type: "array",
+          items: obj({ search: str("Stock footage search"), picture: str("AI picture description of this exact moment") }),
+        },
         fallbackQuery: str("Broader stock footage search"),
         aiPrompt: str("Cinematic shot description for an AI video model"),
         keyMoment: { type: "boolean", description: "True for the biggest reveal or emotional peak" },
@@ -316,8 +368,8 @@ Turn this script into scenes for an automatically edited ${video.format === "sho
   }));
   const scenes = result.scenes
     .filter((s) => s.narration.trim())
-    .map((s) => ({ ...s, shots: s.shots.filter((q) => q.trim()).slice(0, 3) }))
-    .map((s) => ({ ...s, shots: s.shots.length ? s.shots : [s.fallbackQuery] }));
+    .map((s) => ({ ...s, shots: s.shots.filter((q) => q.search.trim() || q.picture.trim()).slice(0, 3) }))
+    .map((s) => ({ ...s, shots: s.shots.length ? s.shots : [{ search: s.fallbackQuery, picture: s.aiPrompt }] }));
   if (!scenes.length) throw new Error("The script has no spoken lines to narrate.");
   return scenes;
 }

@@ -178,6 +178,8 @@ const channelInput = z.object({
   voiceId: z.string().max(100).optional(),
   voiceStyle: z.string().max(600).optional(),
   look: z.enum(["cinematic", "clean", "warm"]).optional(),
+  visuals: z.enum(["stock", "pictures"]).optional(),
+  pictureStyle: z.string().max(600).optional(),
   aiFootage: z.enum(["off", "hook", "key", "all"]).optional(),
   aiQuality: z.enum(["fast", "best"]).optional(),
   affiliateLinks: z.string().max(3000).optional(),
@@ -369,6 +371,9 @@ app.post("/api/videos/:id/render", async (req, res) => {
   notAutomated(video);
   if (!video.script.trim()) throw new HttpError(400, "Write the script first.");
   const renderChannel = getChannel(video.channelId);
+  if (renderChannel.visuals === "pictures" && !geminiConfigured()) {
+    throw new HttpError(400, "AI pictures use your Gemini key: add it on the Setup page (box 2a), or set Visuals to stock footage under Edit channel.");
+  }
   if ((renderChannel.aiFootage ?? "off") !== "off" && !geminiConfigured()) {
     throw new HttpError(400, "AI footage (Veo) uses your Gemini key: add it on the Setup page (box 2a), or set AI footage to Off under Edit channel.");
   }

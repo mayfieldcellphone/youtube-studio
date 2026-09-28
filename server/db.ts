@@ -44,6 +44,10 @@ export interface Channel {
   affiliateLinks?: string;
   /** Color grade for automatically made videos */
   look?: VideoLook;
+  /** Stock footage, or an AI picture drawn for every shot */
+  visuals?: "stock" | "pictures";
+  /** How AI pictures should look; empty uses a style that fits the look */
+  pictureStyle?: string;
   /** Which shots are made with Google Veo AI video instead of stock footage */
   aiFootage?: "off" | "hook" | "key" | "all";
   /** Veo model tier: fast is cheaper, best looks better */

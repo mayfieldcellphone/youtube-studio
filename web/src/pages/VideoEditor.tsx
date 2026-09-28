@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { ArrowLeft, BookOpen, CalendarClock, Check, ExternalLink, Film, Image, Sparkles, Trash2, Upload, Wand2 } from "lucide-react";
 import {
   aiFootageEstimate,
+  picturesEstimate,
   api,
   compact,
   fileSize,
@@ -327,6 +328,12 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
                       {channel.voiceId && (channel.voiceEngine === "gemini" || channel.voiceEngine === "kokoro") ? `, ${channel.voiceId}` : ""}
                     </b>{" "}
                     · <a className="underline" href={`#/channels/${channel.id}/edit`}>change</a>
+                  </p>
+                )}
+                {channel && picturesEstimate(channel, video) && (
+                  <p className="mt-1 text-xs text-zinc-500">
+                    AI pictures: about <b>{picturesEstimate(channel, video)!.pictures}</b>, roughly{" "}
+                    <b>${picturesEstimate(channel, video)!.cost.toFixed(2)}</b>.
                   </p>
                 )}
                 {channel && aiFootageEstimate(channel, video.format) && (
