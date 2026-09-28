@@ -150,18 +150,26 @@ export default function Setup() {
         </div>
       </Section>
 
-      <Section ok={status.passwordRequired} title="5. Login password (optional)" labels={["On", "Off"]}>
-        <p>
-          On your own computer, only you can open the app, so a password is optional. Set one if other people use this computer,
-          and always before putting the app online.
-        </p>
+      <Section ok={status.passwordRequired} title={status.online ? "5. Login password" : "5. Login password (optional)"} labels={["On", "Off"]}>
+        {status.online ? (
+          <p>
+            The app is online, so it always needs a password (at least 10 characters). Changing it here logs out every other
+            browser. It replaces the APP_PASSWORD you set on your host.
+          </p>
+        ) : (
+          <p>
+            On your own computer, only you can open the app, so a password is optional. Set one if other people use this computer,
+            and always before putting the app online.
+          </p>
+        )}
         {field("APP_PASSWORD", "Password", "Choose a password")}
       </Section>
 
       <Section title="Advanced: app address">
         <p>
-          Leave this empty while the app runs on your computer. Change it only when the app is online, for example{" "}
-          <code>https://studio.example.com</code>. It changes the YouTube redirect address above.
+          Leave this empty on your computer, and on Railway (the app finds its Railway address by itself). Fill it in only if you
+          give the app your own domain, for example <code>https://studio.example.com</code>. It changes the YouTube redirect
+          address above.
         </p>
         {field("APP_URL", "App address", "http://localhost:3000", false)}
       </Section>

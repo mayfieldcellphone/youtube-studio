@@ -60,7 +60,7 @@ export default function App() {
   }, [init]);
 
   if (!status) return null;
-  if (!status.loggedIn) return <Login onLogin={init} />;
+  if (!status.loggedIn) return <Login locked={status.locked} onLogin={init} />;
 
   const [section, id, sub] = route.parts;
   let page: ReactNode;

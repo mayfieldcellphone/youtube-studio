@@ -82,6 +82,9 @@ export type Settings = Record<SettingKey, { set: boolean; hint?: string; value?:
 export interface Status {
   loggedIn: boolean;
   passwordRequired: boolean;
+  /** Online without a password: the app refuses to work until APP_PASSWORD is set on the host. */
+  locked: boolean;
+  online: boolean;
   ai: boolean;
   youtube: boolean;
   voice: boolean;

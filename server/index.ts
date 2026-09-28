@@ -14,7 +14,7 @@ import { engineReady, geminiConfigured, listVoices, previewVoice, voiceFor, type
 import { ffmpegAvailable, isRendering, recoverInterruptedRenders, startRender } from "./render";
 import { cancelPipeline, inPipeline, recoverInterruptedPipelines, startPipeline } from "./pipeline";
 import { authUrl, completeAuth, redirectUri, syncChannel, uploadAndSchedule, youtubeConfigured } from "./youtube";
-import { describeSettings, keyProblems, loadSettings, saveSettings, SETTING_KEYS, wrongBox, type SettingKey } from "./settings";
+import { appUrl, describeSettings, keyProblems, loadSettings, saveSettings, SETTING_KEYS, wrongBox, type SettingKey } from "./settings";
 
 loadSettings();
 
@@ -22,8 +22,13 @@ const PORT = Number(process.env.PORT ?? 3000);
 const PROD = process.env.NODE_ENV === "production" || process.argv.includes("--prod");
 // Only this computer can open the app unless HOST is set (e.g. HOST=0.0.0.0 on a server).
 const HOST = process.env.HOST ?? "127.0.0.1";
+/** Reachable from other computers (e.g. hosted online), so a password is required. */
+const ONLINE = !["127.0.0.1", "localhost", "::1"].includes(HOST);
+const MIN_ONLINE_PASSWORD = 10;
 
 const app = express();
+// Hosts like Railway sit behind one proxy; trust it so req.ip is the visitor's address.
+if (ONLINE) app.set("trust proxy", 1);
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser(process.env.SESSION_SECRET));
 
@@ -34,7 +39,7 @@ const cookieOpts = () => ({
   signed: true,
   httpOnly: true,
   sameSite: "lax" as const,
-  secure: (process.env.APP_URL ?? "").startsWith("https://"),
+  secure: appUrl().startsWith("https://"),
 });
 
 function sameText(a: string, b: string) {
@@ -46,13 +51,17 @@ function sameText(a: string, b: string) {
 const password = () => process.env.APP_PASSWORD ?? "";
 /** Tied to the password, so changing the password logs out every other browser. */
 const sessionToken = () => crypto.createHash("sha256").update(`session:${password()}`).digest("hex").slice(0, 32);
-const loggedIn = (req: Request) => !password() || req.signedCookies.session === sessionToken();
+/** Online without a password: nobody may use the app until APP_PASSWORD is set on the host. */
+const locked = () => ONLINE && !password();
+const loggedIn = (req: Request) => !locked() && (!password() || req.signedCookies.session === sessionToken());
 const logIn = (res: Response) => res.cookie("session", sessionToken(), { ...cookieOpts(), maxAge: 30 * 24 * 3600 * 1000 });
 
 app.get("/api/status", (req, res) => {
   res.json({
     loggedIn: loggedIn(req),
     passwordRequired: Boolean(password()),
+    locked: locked(),
+    online: ONLINE,
     ai: aiConfigured(),
     youtube: youtubeConfigured(),
     voice: voiceConfigured(),
@@ -64,12 +73,27 @@ app.get("/api/status", (req, res) => {
   });
 });
 
+// Slows down password guessing: 5 wrong tries per address, then a 15 minute wait.
+const failedLogins = new Map<string, { count: number; until: number }>();
+
 app.post("/api/login", (req, res) => {
+  if (locked()) return res.status(403).json({ error: "Set APP_PASSWORD on your host first (see below)." });
+  const ip = req.ip ?? "unknown";
+  const failed = failedLogins.get(ip);
+  if (failed && failed.count >= 5 && failed.until > Date.now()) {
+    return res.status(429).json({ error: "Too many wrong passwords. Wait 15 minutes and try again." });
+  }
   const attempt = String(req.body?.password ?? "");
   if (!password() || sameText(attempt, password())) {
+    failedLogins.delete(ip);
     logIn(res);
     return res.json({ ok: true });
   }
+  if (failedLogins.size > 1000) {
+    for (const [key, entry] of failedLogins) if (entry.until < Date.now()) failedLogins.delete(key);
+  }
+  const count = failed && failed.until > Date.now() ? failed.count + 1 : 1;
+  failedLogins.set(ip, { count, until: Date.now() + 15 * 60 * 1000 });
   res.status(401).json({ error: "Wrong password." });
 });
 
@@ -125,6 +149,13 @@ app.put("/api/settings", (req, res) => {
   for (const [key, value] of Object.entries(values)) {
     const problem = value && wrongBox(key as SettingKey, value.trim());
     if (problem) throw new HttpError(400, problem);
+  }
+  const newPassword = values.APP_PASSWORD?.trim();
+  if (ONLINE && newPassword !== undefined) {
+    if (!newPassword) throw new HttpError(400, "The app is online, so it must keep a password. Enter a new one instead.");
+    if (newPassword.length < MIN_ONLINE_PASSWORD) {
+      throw new HttpError(400, `The app is online, so use a password of at least ${MIN_ONLINE_PASSWORD} characters.`);
+    }
   }
   saveSettings(values);
   // Keep this browser logged in after setting or changing the password.
@@ -527,6 +558,10 @@ recoverInterruptedRenders();
 recoverInterruptedPipelines();
 
 app.listen(PORT, HOST, () => {
-  console.log(`\n  YouTube Studio is running. Open http://localhost:${PORT} in your browser.\n  Keep this window open while you use the app.\n`);
-  if (!password() && HOST !== "127.0.0.1") console.warn("APP_PASSWORD is not set: anyone who can reach this server can use it.");
+  if (ONLINE) {
+    console.log(`YouTube Studio is running on port ${PORT} (${appUrl()}).`);
+    if (locked()) console.warn("APP_PASSWORD is not set, so the app is locked. Add it to the host's variables.");
+  } else {
+    console.log(`\n  YouTube Studio is running. Open http://localhost:${PORT} in your browser.\n  Keep this window open while you use the app.\n`);
+  }
 });

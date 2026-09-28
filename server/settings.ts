@@ -75,6 +75,15 @@ export function keyProblems() {
   });
 }
 
+/**
+ * The app's public address: the one saved on the Setup page, else the address Railway
+ * gives the app, else this computer.
+ */
+export function appUrl() {
+  const url = process.env.APP_URL || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : "http://localhost:3000");
+  return url.replace(/\/$/, "");
+}
+
 /** Loads saved settings into process.env. Also creates the login-cookie secret on first run. */
 export function loadSettings() {
   const saved = read();

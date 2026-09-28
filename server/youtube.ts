@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { google } from "googleapis";
 import { db, type Channel, type Video } from "./db";
+import { appUrl } from "./settings";
 
 const SCOPES = [
   "https://www.googleapis.com/auth/youtube.upload",
@@ -10,8 +11,7 @@ const SCOPES = [
 export const youtubeConfigured = () =>
   Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
 
-export const redirectUri = () =>
-  `${(process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, "")}/api/youtube/callback`;
+export const redirectUri = () => `${appUrl()}/api/youtube/callback`;
 
 function oauthClient() {
   return new google.auth.OAuth2(

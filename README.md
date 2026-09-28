@@ -30,6 +30,20 @@ A kanban board per channel tracks each video from idea to scripted, ready, sched
 
 Keep the black window open while you use the app. Close it to stop the app.
 
+## Run it online (Railway), updated on every GitHub push
+
+Open the app from any computer or phone, with nothing to download. [Railway](https://railway.com) builds this repo with its `Dockerfile` and redeploys it automatically each time `main` changes. It costs about $5-15 a month, depending on how many videos you render.
+
+1. Sign in at [railway.com](https://railway.com) with GitHub, and pick the **Hobby** plan.
+2. Click **New Project** → **Deploy from GitHub repo** → `youtube-studio`. If the repo isn't listed, click **Configure GitHub App** and allow it.
+3. In the new service, open the **Variables** tab → **New Variable**: name `APP_PASSWORD`, value a password of at least 10 characters. Until this is set, the app stays locked.
+4. Right-click the service → **Attach volume**, with mount path `/data`. Channels, videos, keys and uploads live there and survive updates.
+5. **Settings** → **Networking** → **Generate Domain**. Your app gets an address like `https://youtube-studio-production.up.railway.app`.
+6. Click **Deploy**. When it's done, open the address, log in, and enter your keys on the **Setup** page.
+7. Copy the new redirect URI from Setup box 4, add it to your Google OAuth client's **Authorized redirect URIs**, then click **Connect YouTube** again on each channel.
+
+The app detects its Railway address by itself, so leave **App address** empty. An update restarts the app, and a video that was rendering at that moment has to be started again.
+
 ## Run it (developers)
 
 ```bash
@@ -41,7 +55,7 @@ npm run build && npm start
 
 Keys saved on the Setup page are stored in `data/settings.json` and take priority over `.env` (see `.env.example`). All data (channels, videos, uploaded files, settings) lives in `./data`. Set `DATA_DIR` to change it, and back that folder up.
 
-The app only accepts connections from the same computer. To run it on a server, set `HOST=0.0.0.0`, set a password, and set `APP_URL` to its public https address.
+The app only accepts connections from the same computer. To run it on a server, set `HOST=0.0.0.0` (the `Dockerfile` does this), set `APP_PASSWORD` (at least 10 characters; the app stays locked without one) and set `APP_URL` to its public https address (automatic on Railway). After 5 wrong passwords, an address has to wait 15 minutes.
 
 ## Keys
 
