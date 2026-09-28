@@ -332,13 +332,56 @@ export interface Shot {
 
 /** Splits a script into narrated scenes, each with its shots (stock searches and AI picture descriptions). */
 export async function planScenes(channel: Channel, video: Video) {
+  // A long script is planned in parts at the same time: one reply can't hold a detailed
+  // shot list for a whole 10-minute video.
+  const parts = splitScript(video.script, 250);
+  const planned: Scene[][] = new Array(parts.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < parts.length) {
+      const i = next++;
+      planned[i] = await planPart(channel, video, parts, i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(4, parts.length) }, worker));
+  const scenes = planned.flat();
+  if (!scenes.length) throw new Error("The script has no spoken lines to narrate.");
+  return scenes;
+}
+
+/** Splits a script at line breaks (or sentences, for very long paragraphs) into parts of about maxWords. */
+export function splitScript(script: string, maxWords: number) {
+  const words = (t: string) => t.split(/\s+/).filter(Boolean).length;
+  const pieces = script
+    .split(/\n+/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .flatMap((p) => (words(p) > maxWords ? p.match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g) ?? [p] : [p]));
+  const parts: string[] = [];
+  let current: string[] = [];
+  for (const piece of pieces) {
+    if (current.length && words([...current, piece].join(" ")) > maxWords) {
+      parts.push(current.join("\n"));
+      current = [];
+    }
+    current.push(piece.trim());
+  }
+  if (current.length) parts.push(current.join("\n"));
+  return parts;
+}
+
+async function planPart(channel: Channel, video: Video, parts: string[], index: number) {
   const pictures = channel.visuals === "pictures";
   // AI pictures cost per picture, so long videos hold each one a little longer.
   const pace = video.format === "short" ? "2-3" : pictures ? "5-7" : "3-5";
+  const script =
+    parts.length === 1
+      ? `Script:\n${parts[0]}`
+      : `The whole script, for context only (keep people, places and era consistent with it):\n${video.script}\n\n` +
+        `Only turn THIS PART (part ${index + 1} of ${parts.length}) into scenes:\n${parts[index]}`;
   const prompt = `${channelBrief(channel)}
 
-Script:
-${video.script}
+${script}
 
 Turn this script into scenes for an automatically edited ${video.format === "short" ? "vertical YouTube Short" : "horizontal YouTube video"}.
 - "narration": the exact words the narrator says in this scene, copied from the script in order. Remove anything in [square brackets] and any speaker labels. Together, the scenes must contain the whole spoken script.
@@ -349,7 +392,7 @@ Turn this script into scenes for an automatically edited ${video.format === "sho
   Vary the shots like a film editor: alternate wide shots, medium shots and close-up details (hands, objects, documents, footprints). Don't repeat the same subject twice in a row.
 - "fallbackQuery": a broad 1-2 word search in case a shot finds nothing ("forest", "old paper").
 - "aiPrompt": one vivid shot description for an AI video generator, in English, 30-60 words: the subject, setting and era, lighting, camera movement and mood, like a film director's shot note ("Slow dolly toward a stone lighthouse on a storm-lashed Scottish cliff, 1900, grey dawn light, waves exploding below, cinematic, desaturated, tense"). It must match the narration. No text, captions or logos; no real, named people (describe anonymous figures instead); no gore.
-- "keyMoment": true for the 1-2 scenes that hold the biggest reveal or emotional peak; false for all others.`;
+- "keyMoment": true for the 1-2 scenes that hold the biggest reveal or emotional peak of the whole video; false for all others${parts.length > 1 ? " (and for every scene if this part has none of them)" : ""}.`;
 
   const result = await generate<{ scenes: Scene[] }>(prompt, obj({
     scenes: {
@@ -366,10 +409,8 @@ Turn this script into scenes for an automatically edited ${video.format === "sho
       }),
     },
   }));
-  const scenes = result.scenes
+  return result.scenes
     .filter((s) => s.narration.trim())
     .map((s) => ({ ...s, shots: s.shots.filter((q) => q.search.trim() || q.picture.trim()).slice(0, 3) }))
     .map((s) => ({ ...s, shots: s.shots.length ? s.shots : [{ search: s.fallbackQuery, picture: s.aiPrompt }] }));
-  if (!scenes.length) throw new Error("The script has no spoken lines to narrate.");
-  return scenes;
 }

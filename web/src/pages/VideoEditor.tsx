@@ -315,7 +315,7 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
                   <Wand2 className="h-4 w-4 text-red-600" /> Make it automatically
                 </p>
                 <p className="muted mt-1">
-                  AI voiceover (the channel's voice engine), matching stock footage (Pexels) and captions, edited into a{" "}
+                  AI voiceover (the channel's voice engine), {channel?.visuals === "pictures" ? "AI pictures of the story" : "matching stock footage (Pexels)"} and captions, edited into a{" "}
                   {video.format === "short" ? "vertical Short" : "horizontal video"}. Takes a few minutes.
                 </p>
                 {channel && (
