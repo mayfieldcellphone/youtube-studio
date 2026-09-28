@@ -557,7 +557,7 @@ if (PROD) {
 recoverInterruptedRenders();
 recoverInterruptedPipelines();
 
-app.listen(PORT, HOST, () => {
+const server = app.listen(PORT, HOST, () => {
   if (ONLINE) {
     console.log(`YouTube Studio is running on port ${PORT} (${appUrl()}).`);
     if (locked()) console.warn("APP_PASSWORD is not set, so the app is locked. Add it to the host's variables.");
@@ -565,3 +565,11 @@ app.listen(PORT, HOST, () => {
     console.log(`\n  YouTube Studio is running. Open http://localhost:${PORT} in your browser.\n  Keep this window open while you use the app.\n`);
   }
 });
+
+// Hosts stop the old copy with SIGTERM on every update; exit cleanly so it isn't reported as a crash.
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
+  process.on(signal, () => {
+    server.close();
+    process.exit(0);
+  });
+}

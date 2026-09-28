@@ -16,4 +16,5 @@ ENV HOST=0.0.0.0 \
     DATA_DIR=/data \
     WORK_DIR=/tmp/studio-work \
     NODE_ENV=production
-CMD ["npm", "start"]
+# Run the server directly (not through npm) so it receives the stop signal from the host.
+CMD ["node_modules/.bin/tsx", "server/index.ts", "--prod"]
