@@ -414,3 +414,72 @@ Turn this script into scenes for an automatically edited ${video.format === "sho
     .map((s) => ({ ...s, shots: s.shots.filter((q) => q.search.trim() || q.picture.trim()).slice(0, 3) }))
     .map((s) => ({ ...s, shots: s.shots.length ? s.shots : [{ search: s.fallbackQuery, picture: s.aiPrompt }] }));
 }
+
+export interface SeriesEpisode {
+  part: number;
+  totalParts: number;
+  title: string;
+  hook: string;
+  angle: string;
+  keyword: string;
+  script: string;
+  visualAnchor: string;
+}
+
+/**
+ * Takes any story (or user-submitted text in any language) and breaks it down into a
+ * serialized, high-retention multi-part episode series for YouTube Shorts or long videos.
+ */
+export async function splitStoryIntoSeries(
+  channel: Channel,
+  storyOrTopic: string,
+  partsCount: number = 3,
+  format: "short" | "long" = "short",
+  visualStyle?: string,
+): Promise<SeriesEpisode[]> {
+  const prompt = `${channelBrief(channel)}
+
+Input Story or Topic (may be provided in any language):
+"""
+${storyOrTopic}
+"""
+
+You are a master viral storyteller and YouTube series director.
+Take this story and turn it into a high-retention serialized ${partsCount}-part ${format === "short" ? "YouTube Shorts" : "video"} series.
+Rules:
+1. Translate / adapt into the channel's target language (${channel.language || "English"}), maintaining emotional depth and suspense.
+2. Break the narrative cleanly across exactly ${partsCount} continuous parts:
+   - Part 1: The Gripping Hook & Disruption. Introduce the central figure/mystery, set the stakes, end on a steep cliffhanger ("Follow for Part 2...").
+   - Part 2 (to ${partsCount - 1}): Rising tension, unexpected twists, clues, discoveries, or failed investigations.
+   - Part ${partsCount} (Finale): The terrifying climax, reveal, aftermath, and lingering question.
+3. Length: Each part must be timed for ${format === "short" ? "45-55 seconds (approx 110-140 words)" : "7-10 minutes"}, written in punchy, cinematic sentences.
+4. Retention & Tone:
+   - Match the channel's tone: "${channel.tone || "Suspenseful, cinematic documentary storyteller"}".
+   - Never use clichés like "welcome back" or "buckle up".
+   - In [square brackets], include visual cues that describe the exact historical setting, characters, and atmosphere.
+5. Visual Consistency ("visualAnchor"):
+   - Define a shared visual anchor style (characters, lighting, era clothing, color palette) so all parts feel like they belong to the same film.
+   ${visualStyle ? `User visual preference: ${visualStyle}` : ""}`;
+
+  const result = await generate<{ series: SeriesEpisode[] }>(
+    prompt,
+    obj({
+      series: {
+        type: "array",
+        items: obj({
+          part: { type: "number", description: "Part index (1, 2, ...)" },
+          totalParts: { type: "number", description: "Total parts in series" },
+          title: str("Viral episode title with Part number, e.g. 'The Disappearance [Part 1/3]'"),
+          hook: str("3-second opening hook line"),
+          angle: str("The emotional angle/thesis of this episode"),
+          keyword: str("Search keyword for YouTube SEO"),
+          script: str("Complete spoken script for this episode including [visual cues]"),
+          visualAnchor: str("Shared visual setting & aesthetic definition for this series"),
+        }),
+      },
+    }),
+  );
+
+  return result.series;
+}
+

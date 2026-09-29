@@ -175,6 +175,14 @@ export const api = {
   startPipeline: (videoIds: string[], stopAfter: StopAfter) =>
     request<{ queued: number }>("POST", "/api/pipeline", { videoIds, stopAfter }),
   cancelPipeline: (id: string) => request<Video>("POST", `/api/videos/${id}/pipeline/cancel`),
+  splitStoryIntoSeries: (data: {
+    channelId: string;
+    story: string;
+    parts: number;
+    format: VideoFormat;
+    visualStyle?: string;
+    autoProduce?: boolean;
+  }) => request<{ episodes: Video[]; visualAnchor: string }>("POST", "/api/series/split", data),
 };
 
 export const STATUS_LABELS: Record<VideoStatus, string> = {

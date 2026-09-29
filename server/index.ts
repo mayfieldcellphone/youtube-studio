@@ -8,7 +8,7 @@ import multer from "multer";
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { db, publicChannel, publicVideo, UPLOAD_DIR, WORK_DIR, type Video } from "./db";
-import { aiConfigured, generateIdeas, generateMetadata, generateScript, research } from "./ai";
+import { aiConfigured, generateIdeas, generateMetadata, generateScript, research, splitStoryIntoSeries } from "./ai";
 import { footageConfigured, voiceCharactersLeft, voiceConfigured } from "./media";
 import { engineReady, geminiConfigured, listVoices, previewVoice, voiceFor, type VoiceEngine } from "./voices";
 import { ffmpegAvailable, isRendering, recoverInterruptedRenders, startRender } from "./render";
@@ -275,6 +275,46 @@ app.post("/api/videos", (req, res) => {
     .parse(req.body);
   getChannel(input.channelId);
   res.json(publicVideo(db.createVideo(input)));
+});
+
+app.post("/api/series/split", async (req, res) => {
+  requireAi();
+  const input = z
+    .object({
+      channelId: z.string(),
+      story: z.string().trim().min(10).max(50_000),
+      parts: z.number().int().min(2).max(6).default(3),
+      format: z.enum(["short", "long"]).default("short"),
+      visualStyle: z.string().max(300).optional(),
+      autoProduce: z.boolean().default(false),
+    })
+    .parse(req.body);
+
+  const channel = getChannel(input.channelId);
+  const episodes = await splitStoryIntoSeries(channel, input.story, input.parts, input.format, input.visualStyle);
+
+  const createdVideos = episodes.map((ep) =>
+    db.createVideo({
+      channelId: channel.id,
+      title: ep.title,
+      format: input.format,
+      hook: ep.hook,
+      angle: ep.angle,
+      keyword: ep.keyword,
+      script: ep.script,
+      status: "scripted",
+    }),
+  );
+
+  if (input.autoProduce) {
+    const ids = createdVideos.map((v) => v.id);
+    await startPipeline(ids, "video");
+  }
+
+  res.json({
+    episodes: createdVideos.map(publicVideo),
+    visualAnchor: episodes[0]?.visualAnchor ?? "",
+  });
 });
 
 const videoPatch = z
