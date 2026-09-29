@@ -294,41 +294,49 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
                 : (a.scheduledAt ?? a.createdAt).localeCompare(b.scheduledAt ?? b.createdAt),
             );
           return (
-            <section key={col.title} className="rounded-xl bg-zinc-100/70 p-3 dark:bg-zinc-900/60">
+            <section key={col.title} className="rounded-2xl border border-white/[0.06] bg-[#0c0e18]/80 p-3.5 backdrop-blur-xl shadow-inner">
               <div className="mb-1 flex items-baseline justify-between px-1">
-                <h2 className="text-sm font-semibold">{col.title}</h2>
-                <span className="text-xs text-zinc-500">{items.length}</span>
+                <h2 className="font-display text-sm font-bold text-white">{col.title}</h2>
+                <span className="rounded-full border border-white/10 bg-white/[0.05] px-2 py-0.5 text-[11px] font-semibold text-zinc-300">
+                  {items.length}
+                </span>
               </div>
-              <p className="mb-3 px-1 text-xs text-zinc-500">{col.hint}</p>
-              <div className="space-y-2">
+              <p className="mb-3 px-1 text-[11px] text-zinc-500">{col.hint}</p>
+              <div className="space-y-2.5">
                 {items.map((v) => {
                   const job = v.pipeline;
                   const running = job && !job.finishedAt;
                   return (
                     <div
                       key={v.id}
-                      className={`rounded-lg border bg-white p-3 text-sm shadow-sm transition dark:bg-zinc-900 ${
-                        selected.has(v.id) ? "border-red-500" : "border-zinc-200 hover:border-red-300 dark:border-zinc-800 dark:hover:border-red-800"
+                      className={`group rounded-xl border p-3 text-sm transition ${
+                        selected.has(v.id)
+                          ? "border-pink-500 bg-[#191c2e] shadow-[0_0_20px_rgba(255,0,153,0.25)]"
+                          : "border-white/10 bg-[#121524]/80 hover:border-pink-500/40 hover:bg-[#161a2d] hover:shadow-[0_4px_20px_rgba(0,0,0,0.4)]"
                       }`}
                     >
                       <div className="flex items-start gap-2">
                         {selectable(v) && (
                           <input
                             type="checkbox"
-                            className="mt-1 h-4 w-4 accent-red-600"
+                            className="mt-1 h-4 w-4 accent-[#ff0099]"
                             checked={selected.has(v.id)}
                             onChange={() => toggle(v.id)}
                             aria-label={`Select ${v.title}`}
                           />
                         )}
                         <a href={`#/videos/${v.id}`} className="min-w-0 flex-1">
-                          <p className="mb-2 font-medium leading-snug">{v.title}</p>
-                          <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+                          <p className="mb-2 font-medium leading-snug text-zinc-200 group-hover:text-pink-300 transition">
+                            {v.title}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400">
                             <FormatBadge format={v.format} />
-                            {v.status === "failed" && <span className="text-red-600">{STATUS_LABELS.failed}</span>}
-                            {v.scheduledAt && ["scheduled", "published"].includes(v.status) && <span>{formatDateTime(v.scheduledAt)}</span>}
+                            {v.status === "failed" && <span className="text-rose-400 font-semibold">{STATUS_LABELS.failed}</span>}
+                            {v.scheduledAt && ["scheduled", "published"].includes(v.status) && (
+                              <span className="text-pink-300">{formatDateTime(v.scheduledAt)}</span>
+                            )}
                             {v.stats && (
-                              <span className="inline-flex items-center gap-1">
+                              <span className="inline-flex items-center gap-1 text-emerald-400">
                                 <Eye className="h-3 w-3" /> {compact(v.stats.views)}
                               </span>
                             )}
@@ -336,20 +344,20 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
                         </a>
                       </div>
                       {job && (
-                        <div className="mt-2 border-t border-zinc-100 pt-2 text-xs dark:border-zinc-800">
+                        <div className="mt-2.5 border-t border-white/[0.08] pt-2 text-xs">
                           {running ? (
                             <div className="flex items-center justify-between gap-2">
-                              <span className="flex items-center gap-1.5 text-zinc-600 dark:text-zinc-300">
+                              <span className="flex items-center gap-1.5 text-pink-300 font-medium">
                                 <Spinner className="h-3 w-3" />
                                 {job.step}
                                 {job.step === "Making the video" && v.render && !v.render.finishedAt ? ` (${v.render.progress}%)` : ""}
                               </span>
-                              <button className="text-zinc-500 underline" onClick={() => cancel(v.id)}>Cancel</button>
+                              <button className="text-zinc-400 hover:text-zinc-200 underline" onClick={() => cancel(v.id)}>Cancel</button>
                             </div>
                           ) : job.error ? (
-                            <span className="text-red-600" title={job.error}>✗ {job.error.length > 90 ? `${job.error.slice(0, 90)}…` : job.error}</span>
+                            <span className="text-rose-400" title={job.error}>✗ {job.error.length > 90 ? `${job.error.slice(0, 90)}…` : job.error}</span>
                           ) : (
-                            <span className="text-green-700 dark:text-green-400">✓ {job.result}</span>
+                            <span className="text-emerald-400">✓ {job.result}</span>
                           )}
                         </div>
                       )}
