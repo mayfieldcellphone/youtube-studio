@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { 
   BarChart3, 
   BookOpen, 
@@ -18,6 +18,7 @@ import {
   Unlink, 
   Volume2, 
   Wand2, 
+  X, 
   Zap 
 } from "lucide-react";
 import { api, compact, formatDateTime, STATUS_LABELS, type StopAfter, type Video, type VideoFormat, type VideoStatus } from "../api";
@@ -60,6 +61,29 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
   const [musicPresets, setMusicPresets] = useState<Array<{ id: string; name: string; description: string }>>([]);
   const [selectedMusicPreset, setSelectedMusicPreset] = useState("dark-mystery.mp3");
   const [playingMusicPreset, setPlayingMusicPreset] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const stopPreview = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+    setPlayingMusicPreset(null);
+  };
+
+  const togglePreview = (presetId: string) => {
+    if (playingMusicPreset === presetId) {
+      stopPreview();
+    } else {
+      setPlayingMusicPreset(presetId);
+      setTimeout(() => {
+        if (audioRef.current) {
+          audioRef.current.currentTime = 0;
+          audioRef.current.play().catch(() => {});
+        }
+      }, 50);
+    }
+  };
 
   const { busy, error, setError, run } = useAction();
 
@@ -250,13 +274,7 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
                 <button
                   type="button"
                   className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5"
-                  onClick={() => {
-                    if (playingMusicPreset === selectedMusicPreset) {
-                      setPlayingMusicPreset(null);
-                    } else {
-                      setPlayingMusicPreset(selectedMusicPreset);
-                    }
-                  }}
+                  onClick={() => togglePreview(selectedMusicPreset)}
                 >
                   {playingMusicPreset === selectedMusicPreset ? (
                     <>
@@ -286,17 +304,32 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
         </div>
 
         {playingMusicPreset && (
-          <div className="mt-3 pt-3 border-t border-white/[0.08] flex items-center gap-3">
-            <span className="text-xs text-pink-300 shrink-0">
-              🎵 Previewing: {musicPresets.find((p) => p.id === playingMusicPreset)?.name}
-            </span>
-            <audio
-              controls
-              autoPlay
-              src={api.musicPreviewUrl(playingMusicPreset)}
-              className="h-7 w-full max-w-md"
-              onEnded={() => setPlayingMusicPreset(null)}
-            />
+          <div className="mt-3 pt-3 border-t border-white/[0.08] flex items-center justify-between gap-3 bg-black/50 p-2.5 rounded-xl border border-pink-500/25">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="h-2.5 w-2.5 rounded-full bg-pink-500 animate-pulse shrink-0" />
+              <span className="text-xs font-semibold text-pink-300 truncate">
+                🎵 Previewing: {musicPresets.find((p) => p.id === playingMusicPreset)?.name}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <audio
+                ref={audioRef}
+                controls
+                src={api.musicPreviewUrl(playingMusicPreset)}
+                className="h-8 max-w-[200px] sm:max-w-xs"
+                onEnded={stopPreview}
+                onError={stopPreview}
+              />
+              <button
+                type="button"
+                className="rounded-lg border border-white/10 bg-white/10 hover:bg-white/20 p-1.5 text-zinc-300 hover:text-white transition flex items-center gap-1 text-xs"
+                title="Close preview"
+                onClick={stopPreview}
+              >
+                <X className="h-4 w-4" />
+                <span className="hidden sm:inline">Close</span>
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -371,7 +404,7 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
               <input value={focus} onChange={(e) => setFocus(e.target.value)} placeholder="Optional focus, e.g. Lighthouse disappearance, Victorian mystery..." />
               <div className="flex flex-wrap items-center gap-2">
                 <select className="max-w-28 text-xs" value={count} onChange={(e) => setCount(Number(e.target.value))}>
-                  {[2, 3, 5, 10, 15, 20].map((n) => (
+                  {[3, 4, 5].map((n) => (
                     <option key={n} value={n}>
                       {n} ideas
                     </option>
@@ -382,28 +415,28 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
                   {busy === "ideas" ? "Thinking…" : "Generate ideas"}
                 </button>
                 <button className="btn-ghost text-xs" onClick={() => setShowAdd(!showAdd)}>
-                  <Plus className="h-3 w-3" /> Add my own
+                  <Plus className="h-4 w-4" /> Add my own
                 </button>
               </div>
 
-              {/* Quick 1-click generators */}
+              {/* Quick 1-click generators: strictly 3-5 ideas only */}
               <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-white/[0.06]">
                 <span className="text-[11px] text-zinc-400 mr-1">Quick:</span>
                 <button
                   type="button"
                   className="rounded-lg border border-pink-500/30 bg-pink-500/10 px-2.5 py-1 text-xs font-semibold text-pink-300 hover:bg-pink-500/20 transition flex items-center gap-1"
                   disabled={!!busy}
-                  onClick={() => generate(2)}
+                  onClick={() => generate(3)}
                 >
-                  <Zap className="h-3 w-3" /> 2 Ideas
+                  <Zap className="h-3 w-3" /> 3 Ideas
                 </button>
                 <button
                   type="button"
                   className="rounded-lg border border-purple-500/30 bg-purple-500/10 px-2.5 py-1 text-xs font-semibold text-purple-300 hover:bg-purple-500/20 transition flex items-center gap-1"
                   disabled={!!busy}
-                  onClick={() => generate(3)}
+                  onClick={() => generate(4)}
                 >
-                  <Zap className="h-3 w-3" /> 3 Ideas
+                  <Zap className="h-3 w-3" /> 4 Ideas
                 </button>
                 <button
                   type="button"

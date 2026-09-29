@@ -160,10 +160,11 @@ export interface Idea {
 }
 
 export async function generateIdeas(channel: Channel, count: number, existingTitles: string[], focus?: string) {
+  const safeCount = Math.min(5, Math.max(2, count));
   const trends = await scanTrends(channel, focus);
   const prompt = `${channelBrief(channel)}
 ${trends ? `\nWhat is getting attention right now (from a web search today):\n${trends}\n` : ""}
-Come up with ${count} new video ideas for this channel. Mix YouTube Shorts and long-form videos (about 2 Shorts for every long video).
+Come up with ${safeCount} new video ideas for this channel. Mix YouTube Shorts and long-form videos (about 2 Shorts for every long video).
 What makes an idea strong:
 - A proven topic: people already search for it or it has gone viral for other channels, but this idea has a fresh angle.
 - One specific, surprising detail at its core (a name, number, object, date or twist). "The lighthouse keepers who vanished and left dinner on the table" beats "Mysterious disappearances".
@@ -189,7 +190,7 @@ ${focus ? `Focus on: ${focus}\n` : ""}${
       }),
     },
   }));
-  return result.ideas.slice(0, count);
+  return result.ideas.slice(0, safeCount);
 }
 
 /** Researches the topic, using Anthropic web search if available, or direct AI research with Claude/Gemini. */

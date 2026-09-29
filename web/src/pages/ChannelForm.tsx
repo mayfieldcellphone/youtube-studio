@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { X } from "lucide-react";
 import { api, CATEGORIES, DAY_NAMES, type Channel, type Voice, type VoiceEngine } from "../api";
 import { navigate, useApp } from "../App";
 import { ErrorBox, PageHeader, Spinner, useAction } from "../components/ui";
@@ -317,6 +318,7 @@ function MusicField({ channel, onChange }: { channel: Channel; onChange: () => P
   const [presets, setPresets] = useState<Array<{ id: string; name: string; description: string }>>([]);
   const [selectedPreset, setSelectedPreset] = useState<string>("dark-mystery.mp3");
   const [playingPreset, setPlayingPreset] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     api.musicPresets().then((list) => {
@@ -332,11 +334,25 @@ function MusicField({ channel, onChange }: { channel: Channel; onChange: () => P
     });
   };
 
+  const stopPreview = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+    setPlayingPreset(null);
+  };
+
   const togglePreview = (presetId: string) => {
     if (playingPreset === presetId) {
-      setPlayingPreset(null);
+      stopPreview();
     } else {
       setPlayingPreset(presetId);
+      setTimeout(() => {
+        if (audioRef.current) {
+          audioRef.current.currentTime = 0;
+          audioRef.current.play().catch(() => {});
+        }
+      }, 50);
     }
   };
 
@@ -399,13 +415,33 @@ function MusicField({ channel, onChange }: { channel: Channel; onChange: () => P
             </div>
 
             {playingPreset && (
-              <audio
-                controls
-                autoPlay
-                src={api.musicPreviewUrl(playingPreset)}
-                className="w-full h-8 mt-2"
-                onEnded={() => setPlayingPreset(null)}
-              />
+              <div className="mt-3 pt-3 border-t border-white/[0.08] flex items-center justify-between gap-3 bg-black/50 p-2.5 rounded-xl border border-pink-500/25">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="h-2.5 w-2.5 rounded-full bg-pink-500 animate-pulse shrink-0" />
+                  <span className="text-xs font-semibold text-pink-300 truncate">
+                    Previewing: {presets.find((p) => p.id === playingPreset)?.name}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <audio
+                    ref={audioRef}
+                    controls
+                    src={api.musicPreviewUrl(playingPreset)}
+                    className="h-8 max-w-[200px] sm:max-w-xs"
+                    onEnded={stopPreview}
+                    onError={stopPreview}
+                  />
+                  <button
+                    type="button"
+                    className="rounded-lg border border-white/10 bg-white/10 hover:bg-white/20 p-1.5 text-zinc-300 hover:text-white transition flex items-center gap-1 text-xs"
+                    title="Close preview"
+                    onClick={stopPreview}
+                  >
+                    <X className="h-4 w-4" />
+                    <span className="hidden sm:inline">Close</span>
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         )}

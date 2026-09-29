@@ -102,6 +102,31 @@ app.post("/api/logout", (_req, res) => {
   res.json({ ok: true });
 });
 
+const MUSIC_PRESETS = [
+  { id: "dark-mystery.mp3", name: "Dark Mystery & Shadows", description: "Atmospheric low drone with eerie reverb (ideal for History's Shadows & mysteries)" },
+  { id: "cinematic-suspense.mp3", name: "Cinematic Suspense & Tension", description: "Tense, pulsing rhythm & atmospheric thriller sub-bass" },
+  { id: "ancient-echoes.mp3", name: "Ancient Echoes & Documentary Lore", description: "Ethereal, historical ambient pad for documentaries" },
+  { id: "epic-history.mp3", name: "Epic Historical Drama", description: "Deep resonant cinematic chords & wide atmospheric reverb" },
+  { id: "lofi-calm.mp3", name: "Lo-Fi Warmth & Focus", description: "Calm, gentle relaxing background for essays & explainers" },
+];
+
+app.get("/api/music/presets", (_req, res) => {
+  res.json(MUSIC_PRESETS);
+});
+
+app.get("/api/music/preview/:id", (req, res) => {
+  const preset = MUSIC_PRESETS.find((p) => p.id === req.params.id);
+  if (!preset) return res.status(404).json({ error: "Preset not found." });
+  const filePath = path.resolve("assets/music", preset.id);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: "Audio file missing." });
+  res.set({
+    "Content-Type": "audio/mpeg",
+    "Accept-Ranges": "bytes",
+    "Cache-Control": "public, max-age=86400",
+  });
+  res.sendFile(filePath);
+});
+
 app.use("/api", (req, res, next) => {
   if (loggedIn(req)) return next();
   res.status(401).json({ error: "Please log in." });
@@ -534,26 +559,6 @@ app.delete("/api/channels/:id/music", (req, res) => {
   const channel = getChannel(req.params.id);
   if (channel.musicFile) fs.rm(channel.musicFile.path, { force: true }, () => {});
   res.json(publicChannel(db.updateChannel(channel.id, { musicFile: undefined })!));
-});
-
-const MUSIC_PRESETS = [
-  { id: "dark-mystery.mp3", name: "Dark Mystery & Shadows", description: "Atmospheric low drone with eerie reverb (ideal for History's Shadows & mysteries)" },
-  { id: "cinematic-suspense.mp3", name: "Cinematic Suspense & Tension", description: "Tense, pulsing rhythm & atmospheric thriller sub-bass" },
-  { id: "ancient-echoes.mp3", name: "Ancient Echoes & Documentary Lore", description: "Ethereal, historical ambient pad for documentaries" },
-  { id: "epic-history.mp3", name: "Epic Historical Drama", description: "Deep resonant cinematic chords & wide atmospheric reverb" },
-  { id: "lofi-calm.mp3", name: "Lo-Fi Warmth & Focus", description: "Calm, gentle relaxing background for essays & explainers" },
-];
-
-app.get("/api/music/presets", (_req, res) => {
-  res.json(MUSIC_PRESETS);
-});
-
-app.get("/api/music/preview/:id", (req, res) => {
-  const preset = MUSIC_PRESETS.find((p) => p.id === req.params.id);
-  if (!preset) throw new HttpError(404, "Preset not found.");
-  const filePath = path.resolve("assets/music", preset.id);
-  if (!fs.existsSync(filePath)) throw new HttpError(404, "Audio file missing.");
-  res.sendFile(filePath);
 });
 
 app.post("/api/channels/:id/music/preset", (req, res) => {

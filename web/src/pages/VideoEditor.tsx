@@ -243,30 +243,30 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
       >
         {video.research ? (
           <div className="space-y-4">
-            <div className="max-h-96 overflow-y-auto whitespace-pre-wrap rounded-lg bg-zinc-50 p-4 text-sm leading-relaxed dark:bg-zinc-800/60">
+            <div className="max-h-96 overflow-y-auto whitespace-pre-wrap rounded-xl border border-white/20 bg-black/60 p-4 font-mono text-[13px] leading-relaxed text-white shadow-inner selection:bg-pink-500/40">
               {video.research.notes}
             </div>
             {video.research.sources.length > 0 && (
               <div>
-                <p className="mb-2 text-sm font-medium">Sources ({video.research.sources.length})</p>
-                <ul className="space-y-1 text-sm">
+                <p className="mb-2 text-sm font-semibold text-white">Sources ({video.research.sources.length})</p>
+                <ul className="space-y-1.5 text-sm">
                   {video.research.sources.map((src) => (
-                    <li key={src.url} className="truncate">
-                      <a href={src.url} target="_blank" rel="noreferrer" className="text-red-600 hover:underline">
+                    <li key={src.url} className="truncate text-zinc-200">
+                      <a href={src.url} target="_blank" rel="noreferrer" className="text-pink-400 hover:text-pink-300 underline font-semibold">
                         {src.title || src.url}
                       </a>
-                      <span className="ml-2 text-xs text-zinc-500">{new URL(src.url).hostname.replace(/^www\./, "")}</span>
+                      <span className="ml-2 text-xs text-zinc-300 font-mono">{new URL(src.url).hostname.replace(/^www\./, "")}</span>
                     </li>
                   ))}
                 </ul>
               </div>
             )}
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-zinc-300">
               The script is written from these notes. Skim them and open a source or two, especially for claims about real people.
             </p>
           </div>
         ) : (
-          <p className="muted">
+          <p className="text-sm text-zinc-300">
             The AI searches the web and collects facts with their sources, so the script is accurate. Recommended for history,
             mystery and money topics. Takes about a minute.
           </p>
