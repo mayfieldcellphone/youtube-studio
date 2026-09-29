@@ -19,7 +19,8 @@ import {
   Volume2, 
   Wand2, 
   X, 
-  Zap 
+  Zap,
+  Trash2 
 } from "lucide-react";
 import { api, compact, formatDateTime, STATUS_LABELS, type StopAfter, type Video, type VideoFormat, type VideoStatus } from "../api";
 import { navigate, useApp } from "../App";
@@ -189,6 +190,35 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
     });
 
   const cancel = (id: string) => run("cancel", async () => { await api.cancelPipeline(id); await load(); });
+
+  const deleteIdea = (id: string, title: string) =>
+    run(`delete-${id}`, async () => {
+      if (!confirm(`Delete "${title}"?`)) return;
+      await api.deleteVideo(id);
+      setSelected((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      await load();
+      setNotice(`🗑️ Deleted "${title}".`);
+    });
+
+  const deleteSelected = () =>
+    run("delete-bulk", async () => {
+      if (!confirm(`Delete ${selected.size} selected item${selected.size === 1 ? "" : "s"}?`)) return;
+      const ids = [...selected];
+      for (const id of ids) {
+        try {
+          await api.deleteVideo(id);
+        } catch (e) {
+          console.error("Failed to delete", id, e);
+        }
+      }
+      setSelected(new Set());
+      await load();
+      setNotice(`🗑️ Deleted ${ids.length} item${ids.length === 1 ? "" : "s"}.`);
+    });
 
   const sync = () =>
     run("sync", async () => {
@@ -598,12 +628,24 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
               video step by step yourself, just click it.
             </p>
           </div>
-          <div className="flex gap-2">
-            {[2, 3].map((n) => (
-              <button key={n} className="btn-secondary" onClick={() => selectNext(n)}>
-                Select next {n} ideas
+          <div className="flex flex-wrap gap-2">
+            {[2, 3, 5].map((n) => (
+              <button key={n} className="btn-secondary text-xs" onClick={() => selectNext(n)}>
+                Select next {n}
               </button>
             ))}
+            {videos.some((v) => v.status === "idea" && selectable(v)) && (
+              <button
+                className="btn-secondary text-xs"
+                onClick={() =>
+                  setSelected(
+                    new Set(videos.filter((v) => v.status === "idea" && selectable(v)).map((v) => v.id))
+                  )
+                }
+              >
+                Select all ideas
+              </button>
+            )}
           </div>
         </div>
         {selected.size > 0 && (
@@ -620,6 +662,15 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
               {busy === "produce" ? <Spinner /> : <Wand2 className="h-4 w-4" />} Start
             </button>
             <button className="btn-ghost" onClick={() => setSelected(new Set())}>Clear</button>
+            <button
+              type="button"
+              className="btn-ghost text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 text-xs py-1.5 px-3 flex items-center gap-1.5 ml-auto"
+              onClick={deleteSelected}
+              disabled={!!busy}
+            >
+              {busy === "delete-bulk" ? <Spinner className="h-3.5 w-3.5" /> : <Trash2 className="h-3.5 w-3.5" />}
+              Delete selected ({selected.size})
+            </button>
             {stopAfter === "schedule" && (
               <p className="w-full text-xs text-amber-700 dark:text-amber-400">
                 Videos go out without you watching them first. YouTube demonetizes low-quality, mass-produced videos, so check each
@@ -643,10 +694,24 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
           return (
             <section key={col.title} className="rounded-2xl border border-white/[0.06] bg-[#0c0e18]/80 p-3.5 backdrop-blur-xl shadow-inner">
               <div className="mb-1 flex items-baseline justify-between px-1">
-                <h2 className="font-display text-sm font-bold text-white">{col.title}</h2>
-                <span className="rounded-full border border-white/10 bg-white/[0.05] px-2 py-0.5 text-[11px] font-semibold text-zinc-300">
-                  {items.length}
-                </span>
+                <div className="flex items-center gap-2">
+                  <h2 className="font-display text-sm font-bold text-white">{col.title}</h2>
+                  <span className="rounded-full border border-white/10 bg-white/[0.05] px-2 py-0.5 text-[11px] font-semibold text-zinc-300">
+                    {items.length}
+                  </span>
+                </div>
+                {col.title === "Ideas" && items.length > 0 && (
+                  <button
+                    type="button"
+                    className="text-[11px] font-medium text-zinc-400 hover:text-pink-300 transition"
+                    onClick={() => {
+                      const allIdeaIds = items.filter(selectable).map((v) => v.id);
+                      setSelected(new Set(allIdeaIds));
+                    }}
+                  >
+                    Select all
+                  </button>
+                )}
               </div>
               <p className="mb-3 px-1 text-[11px] text-zinc-500">{col.hint}</p>
               <div className="space-y-2.5">
@@ -698,6 +763,20 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
                             )}
                           </div>
                         </a>
+                        {!running && !v.youtubeVideoId && (
+                          <button
+                            type="button"
+                            title="Delete idea"
+                            className="text-zinc-500 hover:text-rose-400 p-1 rounded-lg transition opacity-50 hover:opacity-100 group-hover:opacity-100 shrink-0 hover:bg-rose-500/10"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              deleteIdea(v.id, v.title);
+                            }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                       </div>
                       {job && (
                         <div className="mt-2.5 border-t border-white/[0.08] pt-2 text-xs">
