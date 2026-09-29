@@ -47,13 +47,16 @@ export default function Setup() {
       <ErrorBox error={error} onClose={() => setError(null)} />
       {!settings && !error && <Spinner className="h-6 w-6" />}
 
-      <Section ok={status.ai} title="1. AI writing (Claude)">
+      <Section ok={status.ai} title="1. AI writing (Claude or Gemini)">
+        <p className="text-xs text-zinc-300 mb-2">
+          Used for generating viral ideas, research notes, multi-part series, scripts, and video metadata. You can use Anthropic Claude, or use your Google Gemini key (box 2a below) which powers AI writing automatically!
+        </p>
         <ol className="list-decimal space-y-1.5 pl-5">
           <li>Go to <Ext href="https://console.anthropic.com">console.anthropic.com</Ext>, sign up and add a payment method under <b>Billing</b>.</li>
           <li>Open <b>API Keys</b>, click <b>Create Key</b> and copy it.</li>
         </ol>
         {field("ANTHROPIC_API_KEY", "Anthropic API key", "sk-ant-api03-…")}
-        <p className="mt-2 text-xs text-zinc-500">Used for ideas, web research, scripts, titles, descriptions and tags. You pay per use; a fully researched video typically costs well under $1.</p>
+        <p className="mt-2 text-xs text-zinc-400">Claude key is optional if you have Gemini (box 2a) configured.</p>
       </Section>
 
       <Section title="2. AI voiceover: choose one or more">
@@ -61,20 +64,21 @@ export default function Setup() {
           Each channel picks its voice engine under <b>Edit channel</b>. <b>Kokoro</b> is built in and free with no key, so you can
           make videos right away. Add Gemini or ElevenLabs below for more natural voices.
         </p>
-        <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-zinc-600 dark:text-zinc-400">
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-zinc-300">
           <li><b>Kokoro</b>: free, unlimited, runs on this computer. English only. The first use downloads the voice model (about 90 MB).</li>
-          <li><b>Gemini</b>: very natural, and follows a style you describe. The free tier allows a few voice requests per day; with billing it costs roughly a cent or two per minute of speech.</li>
+          <li><b>Gemini</b>: very natural, and follows a style you describe. Also powers AI pictures and scripts!</li>
           <li><b>ElevenLabs</b>: the most human voice. Paid by characters per month.</li>
         </ul>
       </Section>
 
-      <Section ok={status.gemini} title="2a. Gemini voice (Google AI Studio)">
+      <Section ok={status.gemini} title="2a. Gemini (Google AI Studio) — Voice, AI Pictures & Writing">
         <ol className="list-decimal space-y-1.5 pl-5">
           <li>Go to <Ext href="https://aistudio.google.com/apikey">aistudio.google.com/apikey</Ext> and sign in with your Google account.</li>
           <li>Click <b>Create API key</b> and copy it. (A Gemini app subscription doesn't include this; the key is separate and free to create.)</li>
           <li>For regular posting, turn on billing for the key in AI Studio. The free tier runs out after a few voice requests per day.</li>
         </ol>
         {field("GEMINI_API_KEY", "Gemini API key", "AQ.… or AIza…")}
+        <p className="mt-2 text-xs text-zinc-400">Powers Gemini voiceover, Gemini AI Pictures for historical scenes, and AI script generation.</p>
       </Section>
 
       <Section ok={status.voice} title="2b. ElevenLabs voice (optional)">

@@ -314,32 +314,119 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
 
 function MusicField({ channel, onChange }: { channel: Channel; onChange: () => Promise<void> }) {
   const { busy, error, run } = useAction();
+  const [presets, setPresets] = useState<Array<{ id: string; name: string; description: string }>>([]);
+  const [selectedPreset, setSelectedPreset] = useState<string>("dark-mystery.mp3");
+  const [playingPreset, setPlayingPreset] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.musicPresets().then((list) => {
+      setPresets(list);
+      if (list.length > 0) setSelectedPreset(list[0].id);
+    }).catch(() => {});
+  }, []);
+
+  const handleApplyPreset = () => {
+    run("preset", async () => {
+      await api.applyMusicPreset(channel.id, selectedPreset);
+      await onChange();
+    });
+  };
+
+  const togglePreview = (presetId: string) => {
+    if (playingPreset === presetId) {
+      setPlayingPreset(null);
+    } else {
+      setPlayingPreset(presetId);
+    }
+  };
+
   return (
     <Field
       label="Background music (optional)"
-      hint="Plays quietly under the voice and gets softer while the narrator speaks. Use royalty-free music only: YouTube Studio → Audio Library, or pixabay.com/music."
+      hint="Plays quietly under the voice and ducks automatically when the narrator speaks."
     >
-      <div className="flex flex-wrap items-center gap-2">
-        {channel.musicFile && <span className="text-sm">🎵 {channel.musicFile.name}</span>}
-        <label className="btn-secondary cursor-pointer">
-          {busy === "upload" && <Spinner />}
-          {channel.musicFile ? "Replace" : "Upload music"}
-          <input
-            type="file"
-            accept="audio/*"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              if (file) run("upload", async () => { await api.uploadMusic(channel.id, file); await onChange(); });
-            }}
-          />
-        </label>
+      <div className="space-y-3">
+        {/* Currently selected track */}
         {channel.musicFile && (
-          <button type="button" className="btn-ghost text-red-600" disabled={!!busy} onClick={() => run("remove", async () => { await api.deleteMusic(channel.id); await onChange(); })}>
-            Remove
-          </button>
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.04] p-3 text-xs">
+            <span className="font-medium text-emerald-300 flex items-center gap-1.5">
+              🎵 Active: {channel.musicFile.name}
+            </span>
+            <button
+              type="button"
+              className="text-red-400 hover:text-red-300 font-medium"
+              disabled={!!busy}
+              onClick={() => run("remove", async () => { await api.deleteMusic(channel.id); await onChange(); })}
+            >
+              Remove
+            </button>
+          </div>
         )}
+
+        {/* Standard Music Presets Selector */}
+        {presets.length > 0 && (
+          <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3 space-y-2.5">
+            <p className="text-xs font-semibold text-zinc-200">Standard Royalty-Free Music Library</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={selectedPreset}
+                onChange={(e) => setSelectedPreset(e.target.value)}
+                className="text-xs flex-1 min-w-[200px]"
+              >
+                {presets.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} — {p.description}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                className="btn-secondary text-xs py-1.5 px-3"
+                onClick={() => togglePreview(selectedPreset)}
+              >
+                {playingPreset === selectedPreset ? "⏹ Stop" : "▶ Preview"}
+              </button>
+
+              <button
+                type="button"
+                className="btn-primary text-xs py-1.5 px-3"
+                disabled={!!busy}
+                onClick={handleApplyPreset}
+              >
+                {busy === "preset" ? <Spinner className="h-3 w-3" /> : "Use This Track"}
+              </button>
+            </div>
+
+            {playingPreset && (
+              <audio
+                controls
+                autoPlay
+                src={api.musicPreviewUrl(playingPreset)}
+                className="w-full h-8 mt-2"
+                onEnded={() => setPlayingPreset(null)}
+              />
+            )}
+          </div>
+        )}
+
+        {/* Custom file upload */}
+        <div className="flex items-center gap-2">
+          <label className="btn-secondary text-xs cursor-pointer">
+            {busy === "upload" && <Spinner className="h-3 w-3" />}
+            <span>Upload custom MP3 / WAV file</span>
+            <input
+              type="file"
+              accept="audio/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file) run("upload", async () => { await api.uploadMusic(channel.id, file); await onChange(); });
+              }}
+            />
+          </label>
+        </div>
       </div>
       <ErrorBox error={error} />
     </Field>

@@ -1,21 +1,16 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { 
   CalendarDays, 
-  ChevronRight, 
   Clapperboard, 
   Film, 
-  FolderKanban, 
   Image as ImageIcon, 
   LayoutDashboard, 
   LogOut, 
   Mic, 
   Plus, 
-  Radio, 
   Settings, 
   Sparkles, 
-  Tv, 
   Video as VideoIcon, 
-  Wand2 
 } from "lucide-react";
 import { api, type Channel, type Status } from "./api";
 import Dashboard from "./pages/Dashboard";
@@ -88,28 +83,25 @@ export default function App() {
   else if (section === "videos" && id) page = <VideoEditor key={id} videoId={id} />;
   else if (section === "calendar") page = <Calendar />;
   else if (section === "setup") page = <Setup />;
+  else if (section === "overview") page = <Dashboard />;
   else if (section === "tools" && (id === "image" || id === "audio" || id === "video")) {
     page = <CreativeTools tool={id} />;
-  } else if (section === "director") {
-    // If director mode is clicked, route to first channel or dashboard
-    if (channels.length > 0) {
-      page = <ChannelBoard key={channels[0].id} channelId={channels[0].id} params={route.params} />;
-    } else {
-      page = <Dashboard />;
-    }
+  } else if (channels.length > 0) {
+    // Direct access to your channel board! No extra layer blocking your work.
+    page = <ChannelBoard key={channels[0].id} channelId={channels[0].id} params={route.params} />;
   } else {
     page = <Dashboard />;
   }
 
-  const activeChannel = section === "channels" ? id : undefined;
+  const activeChannelId = section === "channels" ? id : (channels.length > 0 && !section ? channels[0].id : undefined);
 
   return (
     <AppContext.Provider value={{ status, channels, reloadChannels, reloadStatus: init }}>
       <div className="flex min-h-screen flex-col md:flex-row">
-        {/* OpenArt Inspired Sidebar */}
+        {/* OpenArt Modern Glassmorphic Sidebar */}
         <aside className="glass-panel z-20 flex flex-col border-b border-white/[0.08] md:sticky md:top-0 md:h-screen md:w-64 md:shrink-0 md:border-b-0 md:border-r">
           {/* Logo / Header */}
-          <div className="flex items-center gap-3 px-5 py-5 border-b border-white/[0.06]">
+          <div className="flex items-center gap-3 px-5 py-5 border-b border-white/[0.08]">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[#ff75cb] to-[#ff0099] shadow-[0_0_15px_rgba(255,0,153,0.35)]">
               <Clapperboard className="h-5 w-5 text-white" />
             </div>
@@ -119,45 +111,46 @@ export default function App() {
                   Studio Suite
                 </span>
                 <span className="rounded-full border border-white/10 bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-medium text-pink-300">
-                  AI 2.0
+                  v{__APP_VERSION__}
                 </span>
               </div>
-              <p className="truncate text-[11px] text-zinc-400">OpenArt Creator Studio</p>
+              <p className="truncate text-[11px] text-zinc-400">YouTube Studio AI</p>
             </div>
           </div>
 
-          {/* Navigation Links grouped by categories */}
+          {/* Navigation Links */}
           <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5">
-            {/* AGENTS SECTION */}
+            {/* CHANNELS SECTION (Top & Direct) */}
             <div>
-              <div className="px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-zinc-500">
-                Agents
+              <div className="flex items-center justify-between px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                <span>Channels ({channels.length})</span>
+                <a href="#/channels/new" className="text-zinc-400 hover:text-pink-400" title="Add Channel">
+                  <Plus className="h-3.5 w-3.5" />
+                </a>
               </div>
               <div className="space-y-0.5">
-                <NavLink href="/" icon={<Sparkles className="h-4 w-4 text-pink-400" />} active={!section || section === "chat"}>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium">Creator Hub</span>
-                      <span className="text-[10px] font-semibold text-pink-400 uppercase tracking-wider">AI</span>
+                {channels.map((c) => (
+                  <NavLink key={c.id} href={`/channels/${c.id}`} active={activeChannelId === c.id}>
+                    <div className="flex w-full items-center justify-between gap-1.5 truncate">
+                      <span className="truncate font-semibold">{c.name}</span>
+                      {c.youtube ? (
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" title="Connected to YouTube" />
+                      ) : (
+                        <span className="h-1.5 w-1.5 rounded-full bg-amber-400/60" title="Not connected" />
+                      )}
                     </div>
-                  </div>
-                </NavLink>
-                <NavLink 
-                  href={channels.length > 0 ? `/channels/${channels[0].id}` : "/channels/new"} 
-                  icon={<Film className="h-4 w-4 text-purple-400" />} 
-                  active={section === "director"}
-                >
-                  <div className="min-w-0 flex-1">
-                    <span className="font-medium">Director Mode</span>
-                  </div>
+                  </NavLink>
+                ))}
+                <NavLink href="/channels/new" icon={<Plus className="h-4 w-4 text-zinc-400" />} active={activeChannelId === "new"}>
+                  <span className="text-xs text-zinc-400">Add new channel...</span>
                 </NavLink>
               </div>
             </div>
 
             {/* CREATIVE TOOLS SECTION */}
             <div>
-              <div className="px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-zinc-500">
-                Tools
+              <div className="px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                Creative Tools
               </div>
               <div className="space-y-0.5">
                 <NavLink href="/tools/image" icon={<ImageIcon className="h-4 w-4 text-pink-400" />} active={section === "tools" && id === "image"}>
@@ -172,41 +165,17 @@ export default function App() {
               </div>
             </div>
 
-            {/* CHANNELS SECTION */}
+            {/* OVERVIEW & PUBLISHING */}
             <div>
-              <div className="flex items-center justify-between px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-zinc-500">
-                <span>Channels ({channels.length})</span>
-                <a href="#/channels/new" className="text-zinc-400 hover:text-pink-400" title="Add Channel">
-                  <Plus className="h-3.5 w-3.5" />
-                </a>
-              </div>
-              <div className="space-y-0.5">
-                {channels.map((c) => (
-                  <NavLink key={c.id} href={`/channels/${c.id}`} active={activeChannel === c.id}>
-                    <div className="flex w-full items-center justify-between gap-1.5 truncate">
-                      <span className="truncate">{c.name}</span>
-                      {c.youtube ? (
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" title="Connected to YouTube" />
-                      ) : (
-                        <span className="h-1.5 w-1.5 rounded-full bg-amber-400/60" title="Not connected" />
-                      )}
-                    </div>
-                  </NavLink>
-                ))}
-                <NavLink href="/channels/new" icon={<Plus className="h-4 w-4 text-zinc-400" />} active={activeChannel === "new"}>
-                  <span className="text-xs text-zinc-400">Add new channel...</span>
-                </NavLink>
-              </div>
-            </div>
-
-            {/* SCHEDULE & SETUP */}
-            <div>
-              <div className="px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-zinc-500">
-                Publishing
+              <div className="px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                Publishing & Stats
               </div>
               <div className="space-y-0.5">
                 <NavLink href="/calendar" icon={<CalendarDays className="h-4 w-4 text-amber-400" />} active={section === "calendar"}>
                   <span>Calendar</span>
+                </NavLink>
+                <NavLink href="/overview" icon={<LayoutDashboard className="h-4 w-4 text-purple-400" />} active={section === "overview"}>
+                  <span>All Channels Overview</span>
                 </NavLink>
                 <NavLink href="/setup" icon={<Settings className="h-4 w-4 text-zinc-400" />} active={section === "setup"}>
                   <span>Setup & API Keys</span>
@@ -270,7 +239,7 @@ function NavLink({
       className={`group flex items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-medium transition duration-150 ${
         active
           ? "border border-pink-500/30 bg-pink-500/10 text-white shadow-[0_0_15px_rgba(255,0,153,0.15),inset_0_1px_0_rgba(255,255,255,0.1)]"
-          : "text-zinc-400 hover:bg-white/[0.05] hover:text-zinc-200"
+          : "text-zinc-300 hover:bg-white/[0.05] hover:text-white"
       }`}
     >
       {icon && <span className="shrink-0">{icon}</span>}

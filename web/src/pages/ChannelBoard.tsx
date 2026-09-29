@@ -1,5 +1,25 @@
 import { useCallback, useEffect, useState } from "react";
-import { BarChart3, Eye, Link2, Pencil, Plus, RefreshCw, Sparkles, Unlink, Wand2 } from "lucide-react";
+import { 
+  BarChart3, 
+  BookOpen, 
+  Check, 
+  ChevronDown, 
+  ChevronUp, 
+  Eye, 
+  Film, 
+  Link2, 
+  Music, 
+  Pencil, 
+  Play, 
+  Plus, 
+  RefreshCw, 
+  Sparkles, 
+  Square, 
+  Unlink, 
+  Volume2, 
+  Wand2, 
+  Zap 
+} from "lucide-react";
 import { api, compact, formatDateTime, STATUS_LABELS, type StopAfter, type Video, type VideoFormat, type VideoStatus } from "../api";
 import { navigate, useApp } from "../App";
 import { ErrorBox, FormatBadge, PageHeader, Spinner, useAction } from "../components/ui";
@@ -16,7 +36,7 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
   const { channels, status, reloadChannels } = useApp();
   const channel = channels.find((c) => c.id === channelId);
   const [videos, setVideos] = useState<Video[]>([]);
-  const [count, setCount] = useState(10);
+  const [count, setCount] = useState(3);
   const [focus, setFocus] = useState("");
   const [newTitle, setNewTitle] = useState("");
   const [newFormat, setNewFormat] = useState<VideoFormat>("short");
@@ -24,6 +44,23 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
   const [notice, setNotice] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [stopAfter, setStopAfter] = useState<StopAfter>("video");
+  const [newlyCreatedIds, setNewlyCreatedIds] = useState<Set<string>>(new Set());
+
+  // Story-to-Series state
+  const [showSeries, setShowSeries] = useState(false);
+  const [storyText, setStoryText] = useState("");
+  const [seriesParts, setSeriesParts] = useState(3);
+  const [seriesFormat, setSeriesFormat] = useState<VideoFormat>("short");
+  const [seriesStyle, setSeriesStyle] = useState(
+    "Cinematic historical documentary still, moody candlelit atmosphere, dramatic chiaroscuro lighting, 19th century textures, 35mm grain, no text"
+  );
+  const [autoProduceSeries, setAutoProduceSeries] = useState(false);
+
+  // Background Music presets
+  const [musicPresets, setMusicPresets] = useState<Array<{ id: string; name: string; description: string }>>([]);
+  const [selectedMusicPreset, setSelectedMusicPreset] = useState("dark-mystery.mp3");
+  const [playingMusicPreset, setPlayingMusicPreset] = useState<string | null>(null);
+
   const { busy, error, setError, run } = useAction();
 
   const load = useCallback(async () => setVideos(await api.videos(channelId)), [channelId]);
@@ -31,11 +68,18 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
     load().catch((e) => setError(e.message));
   }, [load, setError]);
 
+  useEffect(() => {
+    api.musicPresets().then((list) => {
+      setMusicPresets(list);
+      if (list.length > 0) setSelectedMusicPreset(list[0].id);
+    }).catch(() => {});
+  }, []);
+
   // While videos are being produced automatically, refresh their progress.
   const working = videos.some((v) => (v.pipeline && !v.pipeline.finishedAt) || (v.render && !v.render.finishedAt));
   useEffect(() => {
     if (!working) return;
-    const timer = setInterval(() => load().catch(() => {}), 3000);
+    const timer = setInterval(() => load().catch(() => {}), 2000);
     return () => clearInterval(timer);
   }, [working, load]);
 
@@ -44,13 +88,44 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
 
   if (!channel) return <p className="muted">Channel not found.</p>;
 
-  const generate = () =>
+  const generate = (customCount?: number) =>
     run("ideas", async () => {
       setNotice(null);
-      const ideas = await api.generateIdeas(channel.id, count, focus);
+      const targetCount = customCount || count;
+      const ideas = await api.generateIdeas(channel.id, targetCount, focus);
       setFocus("");
       await load();
-      setNotice(`Added ${ideas.length} new ideas. They're at the top of the Ideas column below.`);
+      setNotice(`✨ Added ${ideas.length} new ideas! Look at the top of the "Ideas" column below.`);
+    });
+
+  const handleApplyMusic = (presetId: string) => {
+    run("music", async () => {
+      await api.applyMusicPreset(channel.id, presetId);
+      await reloadChannels();
+      setNotice(`🎵 Background music applied: "${musicPresets.find(p => p.id === presetId)?.name || presetId}".`);
+    });
+  };
+
+  const handleCreateSeries = () =>
+    run("series", async () => {
+      if (!storyText.trim()) return;
+      setNotice(null);
+      const res = await api.splitStoryIntoSeries({
+        channelId: channel.id,
+        story: storyText.trim(),
+        parts: seriesParts,
+        format: seriesFormat,
+        visualStyle: seriesStyle.trim() || undefined,
+        autoProduce: autoProduceSeries,
+      });
+      setStoryText("");
+      setShowSeries(false);
+      await load();
+      const ids = new Set(res.episodes.map((e) => e.id));
+      setNewlyCreatedIds(ids);
+      setNotice(
+        `🎉 Successfully created ${res.episodes.length} serialized episodes for "${channel.name}"! Look at the "Scripted" column below.`
+      );
     });
 
   const addIdea = () =>
@@ -135,6 +210,97 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
         </div>
       )}
 
+      {/* Standard Background Music Selector & Audio Preview */}
+      <div className="card mb-6 border-white/10 bg-[#121524]/60 backdrop-blur-md">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-pink-500/10 text-pink-400 border border-pink-500/20">
+              <Music className="h-4 w-4" />
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-white flex items-center gap-2">
+                <span>Standard Royalty-Free Background Music</span>
+                {channel.musicFile && (
+                  <span className="rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] px-2 py-0.5 font-medium">
+                    Active: {channel.musicFile.name}
+                  </span>
+                )}
+              </p>
+              <p className="text-[11px] text-zinc-400">
+                Plays quietly under narration and ducks automatically when speaking.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {musicPresets.length > 0 && (
+              <>
+                <select
+                  value={selectedMusicPreset}
+                  onChange={(e) => setSelectedMusicPreset(e.target.value)}
+                  className="text-xs max-w-[260px]"
+                >
+                  {musicPresets.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+
+                <button
+                  type="button"
+                  className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5"
+                  onClick={() => {
+                    if (playingMusicPreset === selectedMusicPreset) {
+                      setPlayingMusicPreset(null);
+                    } else {
+                      setPlayingMusicPreset(selectedMusicPreset);
+                    }
+                  }}
+                >
+                  {playingMusicPreset === selectedMusicPreset ? (
+                    <>
+                      <Square className="h-3 w-3 text-pink-400" /> Stop
+                    </>
+                  ) : (
+                    <>
+                      <Play className="h-3 w-3 text-emerald-400" /> Preview
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  className="btn-primary text-xs py-1.5 px-3"
+                  disabled={busy === "music"}
+                  onClick={() => handleApplyMusic(selectedMusicPreset)}
+                >
+                  {busy === "music" ? <Spinner className="h-3 w-3" /> : "Use Track"}
+                </button>
+              </>
+            )}
+            <a href={`#/channels/${channel.id}/edit`} className="btn-ghost text-xs py-1.5 px-2 text-zinc-400">
+              Upload custom MP3
+            </a>
+          </div>
+        </div>
+
+        {playingMusicPreset && (
+          <div className="mt-3 pt-3 border-t border-white/[0.08] flex items-center gap-3">
+            <span className="text-xs text-pink-300 shrink-0">
+              🎵 Previewing: {musicPresets.find((p) => p.id === playingMusicPreset)?.name}
+            </span>
+            <audio
+              controls
+              autoPlay
+              src={api.musicPreviewUrl(playingMusicPreset)}
+              className="h-7 w-full max-w-md"
+              onEnded={() => setPlayingMusicPreset(null)}
+            />
+          </div>
+        )}
+      </div>
+
       <div className="mb-6 grid gap-4 lg:grid-cols-2">
         <div className="card">
           <div className="mb-3 flex items-center gap-2 font-medium">
@@ -192,32 +358,66 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
         </div>
 
         <div className="card">
-          <div className="mb-3 flex items-center gap-2 font-medium">
-            <Sparkles className="h-4 w-4 text-red-600" /> Get video ideas
+          <div className="mb-3 flex items-center justify-between">
+            <span className="flex items-center gap-2 font-medium">
+              <Sparkles className="h-4 w-4 text-red-600" /> Get video ideas
+            </span>
+            <span className="text-[11px] text-zinc-400">
+              For {channel.name}
+            </span>
           </div>
           {status.ai ? (
             <div className="space-y-3">
-              <input value={focus} onChange={(e) => setFocus(e.target.value)} placeholder="Optional focus, e.g. iPhone 16 problems, beginner tips" />
+              <input value={focus} onChange={(e) => setFocus(e.target.value)} placeholder="Optional focus, e.g. Lighthouse disappearance, Victorian mystery..." />
               <div className="flex flex-wrap items-center gap-2">
-                <select className="max-w-32" value={count} onChange={(e) => setCount(Number(e.target.value))}>
-                  {[5, 10, 15, 20].map((n) => (
+                <select className="max-w-28 text-xs" value={count} onChange={(e) => setCount(Number(e.target.value))}>
+                  {[2, 3, 5, 10, 15, 20].map((n) => (
                     <option key={n} value={n}>
                       {n} ideas
                     </option>
                   ))}
                 </select>
-                <button className="btn-primary" onClick={generate} disabled={!!busy}>
-                  {busy === "ideas" ? <Spinner /> : <Sparkles className="h-4 w-4" />}
+                <button className="btn-primary text-xs" onClick={() => generate()} disabled={!!busy}>
+                  {busy === "ideas" ? <Spinner className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />}
                   {busy === "ideas" ? "Thinking…" : "Generate ideas"}
                 </button>
-                <button className="btn-ghost" onClick={() => setShowAdd(!showAdd)}>
-                  <Plus className="h-4 w-4" /> Add my own
+                <button className="btn-ghost text-xs" onClick={() => setShowAdd(!showAdd)}>
+                  <Plus className="h-3 w-3" /> Add my own
+                </button>
+              </div>
+
+              {/* Quick 1-click generators */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-white/[0.06]">
+                <span className="text-[11px] text-zinc-400 mr-1">Quick:</span>
+                <button
+                  type="button"
+                  className="rounded-lg border border-pink-500/30 bg-pink-500/10 px-2.5 py-1 text-xs font-semibold text-pink-300 hover:bg-pink-500/20 transition flex items-center gap-1"
+                  disabled={!!busy}
+                  onClick={() => generate(2)}
+                >
+                  <Zap className="h-3 w-3" /> 2 Ideas
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg border border-purple-500/30 bg-purple-500/10 px-2.5 py-1 text-xs font-semibold text-purple-300 hover:bg-purple-500/20 transition flex items-center gap-1"
+                  disabled={!!busy}
+                  onClick={() => generate(3)}
+                >
+                  <Zap className="h-3 w-3" /> 3 Ideas
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-2.5 py-1 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/20 transition flex items-center gap-1"
+                  disabled={!!busy}
+                  onClick={() => generate(5)}
+                >
+                  <Zap className="h-3 w-3" /> 5 Ideas
                 </button>
               </div>
             </div>
           ) : (
             <p className="muted">
-              Add your Anthropic API key on the <a className="underline" href="#/setup">Setup</a> page to generate ideas.{" "}
+              Add your Anthropic or Gemini API key on the <a className="underline" href="#/setup">Setup</a> page to generate ideas.{" "}
               <button className="underline" onClick={() => setShowAdd(true)}>Add an idea yourself</button>
             </p>
           )}
@@ -238,6 +438,120 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
             </form>
           )}
         </div>
+      </div>
+
+      {/* Story-to-Series Generator (Episodic Multi-Part Shorts) */}
+      <div className="card mb-6 border-pink-500/30 bg-gradient-to-br from-[#121524] to-[#1d142b] shadow-[0_0_25px_rgba(255,0,153,0.08)]">
+        <div
+          className="flex cursor-pointer items-center justify-between"
+          onClick={() => setShowSeries(!showSeries)}
+        >
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-pink-500 to-purple-600 text-white shadow-md">
+              <BookOpen className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-display text-sm font-bold text-white">
+                  Story-to-Series (Episodic Multi-Part Shorts)
+                </h3>
+                <span className="rounded-full bg-pink-500/20 px-2 py-0.5 text-[10px] font-semibold text-pink-300 uppercase tracking-wider">
+                  Continuous Story
+                </span>
+              </div>
+              <p className="text-xs text-zinc-400">
+                Paste any story in any language &rarr; AI turns it into 2-4 continuous parts with narrative cliffhangers
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowSeries(!showSeries);
+            }}
+          >
+            {showSeries ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            {showSeries ? "Close Story Panel" : "Open Story Panel"}
+          </button>
+        </div>
+
+        {showSeries && (
+          <div className="mt-4 pt-4 border-t border-white/[0.08] space-y-4">
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-zinc-200">
+                Story Text / Document (Any Language):
+              </label>
+              <textarea
+                rows={5}
+                className="w-full text-xs font-mono"
+                placeholder="Paste your story here in English, Urdu, Hindi, Spanish, French, etc... The AI will craft continuous episodes in the channel's target language with hooks and cliffhangers."
+                value={storyText}
+                onChange={(e) => setStoryText(e.target.value)}
+              />
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-zinc-300">Episodes / Parts</label>
+                <select
+                  value={seriesParts}
+                  onChange={(e) => setSeriesParts(Number(e.target.value))}
+                  className="text-xs w-full"
+                >
+                  <option value={2}>2 Parts (Shorts)</option>
+                  <option value={3}>3 Parts (Shorts)</option>
+                  <option value={4}>4 Parts (Shorts)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium text-zinc-300">Format</label>
+                <select
+                  value={seriesFormat}
+                  onChange={(e) => setSeriesFormat(e.target.value as VideoFormat)}
+                  className="text-xs w-full"
+                >
+                  <option value="short">YouTube Short (vertical 9:16)</option>
+                  <option value="long">Long-form Video (16:9)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium text-zinc-300">Visual Style</label>
+                <input
+                  value={seriesStyle}
+                  onChange={(e) => setSeriesStyle(e.target.value)}
+                  placeholder="Atmospheric historical style..."
+                  className="text-xs w-full"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+              <label className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-[#ff0099]"
+                  checked={autoProduceSeries}
+                  onChange={(e) => setAutoProduceSeries(e.target.checked)}
+                />
+                <span>Auto-make full video files right away (voiceover + pictures)</span>
+              </label>
+
+              <button
+                type="button"
+                className="btn-primary text-xs py-2 px-4 flex items-center gap-2"
+                disabled={busy === "series" || !storyText.trim()}
+                onClick={handleCreateSeries}
+              >
+                {busy === "series" ? <Spinner className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+                {busy === "series" ? "Splitting & Scripting Episodes…" : `Create ${seriesParts} Episodic Shorts`}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="card mb-4">
@@ -312,6 +626,8 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
                       className={`group rounded-xl border p-3 text-sm transition ${
                         selected.has(v.id)
                           ? "border-pink-500 bg-[#191c2e] shadow-[0_0_20px_rgba(255,0,153,0.25)]"
+                          : newlyCreatedIds.has(v.id)
+                          ? "border-emerald-500/80 bg-[#122221] shadow-[0_0_20px_rgba(52,211,153,0.25)]"
                           : "border-white/10 bg-[#121524]/80 hover:border-pink-500/40 hover:bg-[#161a2d] hover:shadow-[0_4px_20px_rgba(0,0,0,0.4)]"
                       }`}
                     >
@@ -326,9 +642,16 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
                           />
                         )}
                         <a href={`#/videos/${v.id}`} className="min-w-0 flex-1">
-                          <p className="mb-2 font-medium leading-snug text-zinc-200 group-hover:text-pink-300 transition">
-                            {v.title}
-                          </p>
+                          <div className="flex items-start justify-between gap-1 mb-1.5">
+                            <p className="font-medium leading-snug text-zinc-200 group-hover:text-pink-300 transition">
+                              {v.title}
+                            </p>
+                            {newlyCreatedIds.has(v.id) && (
+                              <span className="shrink-0 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[9px] font-bold px-1.5 py-0.5">
+                                ✨ NEW
+                              </span>
+                            )}
+                          </div>
                           <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-400">
                             <FormatBadge format={v.format} />
                             {v.status === "failed" && <span className="text-rose-400 font-semibold">{STATUS_LABELS.failed}</span>}

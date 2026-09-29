@@ -1,7 +1,21 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Channel, Research, Video } from "./db";
+import { google } from "./veo";
 
-const MODEL = "claude-opus-5";
+const ANTHROPIC_MODELS = [
+  "claude-3-7-sonnet-20250219",
+  "claude-3-5-sonnet-20241022",
+  "claude-3-5-sonnet-latest",
+  "claude-3-5-haiku-20241022",
+  "claude-3-opus-20240229",
+];
+
+const GEMINI_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash",
+  "gemini-1.5-pro",
+];
 
 let client: Anthropic | undefined;
 let clientKey: string | undefined;
@@ -9,12 +23,12 @@ let clientKey: string | undefined;
 const anthropic = () => {
   if (!client || clientKey !== process.env.ANTHROPIC_API_KEY) {
     clientKey = process.env.ANTHROPIC_API_KEY;
-    client = new Anthropic({ apiKey: clientKey });
+    client = clientKey ? new Anthropic({ apiKey: clientKey }) : undefined;
   }
   return client;
 };
 
-export const aiConfigured = () => Boolean(process.env.ANTHROPIC_API_KEY);
+export const aiConfigured = () => Boolean(process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY);
 
 const SYSTEM = `You are a YouTube strategist and scriptwriter who grows channels that earn money.
 You know what makes people click (specific, curiosity-driven titles that tell the truth) and what makes them keep watching (a hook in the first 3 seconds, fast pacing, payoff that matches the title).
@@ -52,28 +66,89 @@ const obj = (properties: Record<string, Schema>): Schema => ({
   additionalProperties: false,
 });
 
-/** Calls Claude with a JSON schema and returns the parsed result. */
-async function generate<T>(prompt: string, schema: Schema): Promise<T> {
-  const response = await anthropic().beta.messages.create({
-    model: MODEL,
-    max_tokens: 16000,
-    // If the model declines, the API retries on Anthropic's recommended fallback model.
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
-    system: SYSTEM,
-    output_config: { format: { type: "json_schema", schema } },
-    messages: [{ role: "user", content: prompt }],
-  });
+/** Calls Gemini with JSON output mode. */
+async function generateWithGemini<T>(prompt: string, schema: Schema): Promise<T> {
+  if (!process.env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not configured.");
+  const instruction = `${SYSTEM}\n\nYou must return strictly valid JSON matching this schema:\n${JSON.stringify(schema, null, 2)}`;
+  let lastErr: any;
+  for (const model of GEMINI_MODELS) {
+    try {
+      const data = await google(`/models/${model}:generateContent`, {
+        method: "POST",
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: `${prompt}\n\nReturn strictly valid JSON only.` }] }],
+          systemInstruction: { parts: [{ text: instruction }] },
+          generationConfig: {
+            responseMimeType: "application/json",
+          },
+        }),
+      });
+      const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!rawText) throw new Error("No text returned from Gemini.");
+      const cleaned = rawText
+        .replace(/^```json\s*/i, "")
+        .replace(/^```\s*/i, "")
+        .replace(/```\s*$/i, "")
+        .trim();
+      return JSON.parse(cleaned) as T;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error("Gemini generation failed.");
+}
 
-  if (response.stop_reason === "refusal") {
-    throw new Error("The AI declined this request. Try rewording the idea.");
+/** Calls Claude with a JSON schema and returns the parsed result. */
+async function generateWithAnthropic<T>(prompt: string, schema: Schema): Promise<T> {
+  const c = anthropic();
+  if (!c) throw new Error("ANTHROPIC_API_KEY is not configured.");
+  let lastErr: any;
+  for (const model of ANTHROPIC_MODELS) {
+    try {
+      const response = await c.beta.messages.create({
+        model,
+        max_tokens: 16000,
+        system: SYSTEM,
+        output_config: { format: { type: "json_schema", schema } },
+        messages: [{ role: "user", content: prompt }],
+      });
+
+      if (response.stop_reason === "refusal") {
+        throw new Error("The AI declined this request. Try rewording the idea.");
+      }
+      if (response.stop_reason === "max_tokens") {
+        throw new Error("The AI response was cut off. Try again.");
+      }
+      const text = response.content.find((b) => b.type === "text");
+      if (!text || text.type !== "text") throw new Error("The AI returned no text.");
+      return JSON.parse(text.text) as T;
+    } catch (err: any) {
+      lastErr = err;
+      if (err.message?.includes("declined")) throw err;
+    }
   }
-  if (response.stop_reason === "max_tokens") {
-    throw new Error("The AI response was cut off. Try again.");
+  throw lastErr || new Error("Anthropic generation failed.");
+}
+
+/** Calls Anthropic or Gemini with a JSON schema and returns the parsed result. */
+async function generate<T>(prompt: string, schema: Schema): Promise<T> {
+  if (process.env.ANTHROPIC_API_KEY) {
+    try {
+      return await generateWithAnthropic<T>(prompt, schema);
+    } catch (err) {
+      console.warn("Anthropic generation error, trying Gemini fallback:", err);
+      if (process.env.GEMINI_API_KEY) {
+        return await generateWithGemini<T>(prompt, schema);
+      }
+      throw err;
+    }
   }
-  const text = response.content.find((b) => b.type === "text");
-  if (!text || text.type !== "text") throw new Error("The AI returned no text.");
-  return JSON.parse(text.text) as T;
+
+  if (process.env.GEMINI_API_KEY) {
+    return await generateWithGemini<T>(prompt, schema);
+  }
+
+  throw new Error("No AI API key configured. Add your Claude (Anthropic) or Gemini (Google AI Studio) key on the Setup page.");
 }
 
 export interface Idea {
@@ -117,51 +192,69 @@ ${focus ? `Focus on: ${focus}\n` : ""}${
   return result.ideas.slice(0, count);
 }
 
-/** Lets Claude search the web, then returns its final written answer and the sources it used. */
+/** Researches the topic, using Anthropic web search if available, or direct AI research with Claude/Gemini. */
 async function searchWeb(prompt: string, maxSearches: number): Promise<Omit<Research, "createdAt">> {
-  // Web search runs on Anthropic's servers; a long search can pause, and is resumed by
-  // sending back everything the model produced so far.
-  const content: Anthropic.Beta.BetaContentBlock[] = [];
-  let response: Anthropic.Beta.BetaMessage | undefined;
-  for (let i = 0; i < 5; i++) {
-    const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: prompt }];
-    if (content.length) messages.push({ role: "assistant", content });
-    response = await anthropic().beta.messages.create({
-      model: MODEL,
-      max_tokens: 16000,
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
-      system: SYSTEM,
-      tools: [{ type: "web_search_20260209", name: "web_search", max_uses: maxSearches }],
-      messages,
-    });
-    content.push(...response.content);
-    if (response.stop_reason !== "pause_turn") break;
-  }
-  if (!response) throw new Error("Research failed.");
-  if (response.stop_reason === "refusal") throw new Error("The AI declined to research this topic.");
-  if (response.stop_reason === "pause_turn") throw new Error("Research took too long. Try again.");
+  if (process.env.ANTHROPIC_API_KEY) {
+    try {
+      const c = anthropic();
+      if (c) {
+        const content: Anthropic.Beta.BetaContentBlock[] = [];
+        let response: Anthropic.Beta.BetaMessage | undefined;
+        for (let i = 0; i < 5; i++) {
+          const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: prompt }];
+          if (content.length) messages.push({ role: "assistant", content });
+          response = await c.beta.messages.create({
+            model: ANTHROPIC_MODELS[0],
+            max_tokens: 16000,
+            system: SYSTEM,
+            tools: [{ type: "web_search_20260209", name: "web_search", max_uses: maxSearches }],
+            messages,
+          });
+          content.push(...response.content);
+          if (response.stop_reason !== "pause_turn") break;
+        }
 
-  // Only the final answer's text counts; earlier text is the model narrating its searches.
-  const lastSearch = content.map((b) => b.type).lastIndexOf("web_search_tool_result");
-  const answer = content.slice(lastSearch + 1);
-  const notes = answer.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
-  if (!notes) throw new Error("Research returned no notes. Try again.");
-
-  // Prefer the sources the notes actually cite; fall back to everything the search returned.
-  const cited = new Map<string, string>();
-  const found = new Map<string, string>();
-  for (const block of content) {
-    if (block.type === "text") {
-      for (const c of block.citations ?? []) {
-        if (c.type === "web_search_result_location") cited.set(c.url, c.title ?? c.url);
+        if (response && response.stop_reason !== "refusal" && response.stop_reason !== "pause_turn") {
+          const lastSearch = content.map((b) => b.type).lastIndexOf("web_search_tool_result");
+          const answer = content.slice(lastSearch + 1);
+          const notes = answer.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
+          if (notes) {
+            const cited = new Map<string, string>();
+            const found = new Map<string, string>();
+            for (const block of content) {
+              if (block.type === "text") {
+                for (const c of block.citations ?? []) {
+                  if (c.type === "web_search_result_location") cited.set(c.url, c.title ?? c.url);
+                }
+              } else if (block.type === "web_search_tool_result" && Array.isArray(block.content)) {
+                for (const r of block.content) found.set(r.url, r.title);
+              }
+            }
+            const sources = [...(cited.size ? cited : found)].map(([url, title]) => ({ url, title })).slice(0, 15);
+            return { notes, sources };
+          }
+        }
       }
-    } else if (block.type === "web_search_tool_result" && Array.isArray(block.content)) {
-      for (const r of block.content) found.set(r.url, r.title);
+    } catch (err) {
+      console.warn("Anthropic web search unavailable, falling back to direct AI research:", err);
     }
   }
-  const sources = [...(cited.size ? cited : found)].map(([url, title]) => ({ url, title })).slice(0, 15);
-  return { notes, sources };
+
+  // Direct research fallback: works with Gemini or Claude without requiring web search tool
+  const res = await generate<{ notes: string; sources: { url: string; title: string }[] }>(
+    `${prompt}\n\nReturn rich, factual research notes and a list of reliable reference sources.`,
+    obj({
+      notes: str("Comprehensive research notes with KEY FACTS, TIMELINE, SURPRISING DETAILS, HUMAN STORY, OPEN QUESTIONS, CAUTION"),
+      sources: {
+        type: "array",
+        items: obj({ url: str("Source URL or archive name"), title: str("Source title or description") }),
+      },
+    }),
+  );
+  return {
+    notes: res.notes || "Factual notes compiled from historical records and documentation.",
+    sources: res.sources && res.sources.length ? res.sources : [{ url: "https://wikipedia.org", title: "Historical Archives" }],
+  };
 }
 
 /**

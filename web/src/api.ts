@@ -136,6 +136,10 @@ export const api = {
     return request<Channel>("POST", `/api/channels/${id}/music`, form);
   },
   deleteMusic: (id: string) => request<Channel>("DELETE", `/api/channels/${id}/music`),
+  musicPresets: () => request<Array<{ id: string; name: string; description: string }>>("GET", "/api/music/presets"),
+  applyMusicPreset: (channelId: string, presetId: string) =>
+    request<Channel>("POST", `/api/channels/${channelId}/music/preset`, { presetId }),
+  musicPreviewUrl: (presetId: string) => `/api/music/preview/${presetId}`,
   syncChannel: (id: string) => request<Channel>("POST", `/api/channels/${id}/sync`),
   disconnectYouTube: (id: string) => request<Channel>("POST", `/api/channels/${id}/youtube/disconnect`),
   connectYouTubeUrl: (id: string) => `/api/channels/${id}/youtube/connect`,

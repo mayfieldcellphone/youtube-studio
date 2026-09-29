@@ -135,7 +135,7 @@ function notAutomated(video: Video) {
 }
 
 function requireAi() {
-  if (!aiConfigured()) throw new HttpError(400, "Add your Claude (Anthropic) key on the Setup page (box 1) to use AI features.");
+  if (!aiConfigured()) throw new HttpError(400, "Add your Claude (Anthropic) or Gemini (Google AI Studio) key on the Setup page to use AI features.");
 }
 
 // ---------- Settings (keys entered on the Setup page) ----------
@@ -404,13 +404,16 @@ app.get("/api/voice/usage", async (_req, res) => {
 
 app.post("/api/videos/:id/render", async (req, res) => {
   requireAi();
-  if (!footageConfigured()) throw new HttpError(400, "Add your Pexels key on the Setup page (box 3) to find stock footage.");
   if (!ffmpegAvailable()) throw new HttpError(500, "FFmpeg is missing. Run npm install again.");
   const video = getVideo(req.params.id);
   if (video.youtubeVideoId) throw new HttpError(400, "This video is already on YouTube.");
   notAutomated(video);
   if (!video.script.trim()) throw new HttpError(400, "Write the script first.");
   const renderChannel = getChannel(video.channelId);
+  const usesAiPictures = renderChannel.visuals === "pictures";
+  if (!footageConfigured() && !usesAiPictures) {
+    throw new HttpError(400, "Add your Pexels key on the Setup page (box 3) for stock footage, or set Visuals to AI pictures under Edit channel.");
+  }
   if (renderChannel.visuals === "pictures" && !geminiConfigured()) {
     throw new HttpError(400, "AI pictures use your Gemini key: add it on the Setup page (box 2a), or set Visuals to stock footage under Edit channel.");
   }
@@ -451,7 +454,15 @@ app.post("/api/pipeline", (req, res) => {
     .parse(req.body);
   const videos = videoIds.map(getVideo);
   if (videos.some((v) => !v.script.trim() || !v.research)) requireAi();
-  if (stopAfter !== "script" && !footageConfigured()) throw new HttpError(400, "Add your Pexels key on the Setup page (box 3) first.");
+  if (stopAfter !== "script") {
+    const needsStock = videos.some((v) => {
+      const ch = db.channel(v.channelId);
+      return ch?.visuals !== "pictures";
+    });
+    if (needsStock && !footageConfigured()) {
+      throw new HttpError(400, "Add your Pexels key on the Setup page (box 3) for stock footage, or set Visuals to AI pictures under Edit channel.");
+    }
+  }
   if (stopAfter === "schedule") {
     const unconnected = videos.find((v) => !db.channel(v.channelId)?.youtube);
     if (unconnected) throw new HttpError(400, "Connect this channel to YouTube first, or choose to stop before scheduling.");
@@ -523,6 +534,42 @@ app.delete("/api/channels/:id/music", (req, res) => {
   const channel = getChannel(req.params.id);
   if (channel.musicFile) fs.rm(channel.musicFile.path, { force: true }, () => {});
   res.json(publicChannel(db.updateChannel(channel.id, { musicFile: undefined })!));
+});
+
+const MUSIC_PRESETS = [
+  { id: "dark-mystery.mp3", name: "Dark Mystery & Shadows", description: "Atmospheric low drone with eerie reverb (ideal for History's Shadows & mysteries)" },
+  { id: "cinematic-suspense.mp3", name: "Cinematic Suspense & Tension", description: "Tense, pulsing rhythm & atmospheric thriller sub-bass" },
+  { id: "ancient-echoes.mp3", name: "Ancient Echoes & Documentary Lore", description: "Ethereal, historical ambient pad for documentaries" },
+  { id: "epic-history.mp3", name: "Epic Historical Drama", description: "Deep resonant cinematic chords & wide atmospheric reverb" },
+  { id: "lofi-calm.mp3", name: "Lo-Fi Warmth & Focus", description: "Calm, gentle relaxing background for essays & explainers" },
+];
+
+app.get("/api/music/presets", (_req, res) => {
+  res.json(MUSIC_PRESETS);
+});
+
+app.get("/api/music/preview/:id", (req, res) => {
+  const preset = MUSIC_PRESETS.find((p) => p.id === req.params.id);
+  if (!preset) throw new HttpError(404, "Preset not found.");
+  const filePath = path.resolve("assets/music", preset.id);
+  if (!fs.existsSync(filePath)) throw new HttpError(404, "Audio file missing.");
+  res.sendFile(filePath);
+});
+
+app.post("/api/channels/:id/music/preset", (req, res) => {
+  const channel = getChannel(req.params.id);
+  const { presetId } = z.object({ presetId: z.string() }).parse(req.body);
+  const preset = MUSIC_PRESETS.find((p) => p.id === presetId);
+  if (!preset) throw new HttpError(400, "Preset not found.");
+  const sourcePath = path.resolve("assets/music", preset.id);
+  if (!fs.existsSync(sourcePath)) throw new HttpError(404, "Preset file missing.");
+
+  if (channel.musicFile) fs.rm(channel.musicFile.path, { force: true }, () => {});
+  const destPath = path.join(UPLOAD_DIR, `${crypto.randomUUID()}.mp3`);
+  fs.copyFileSync(sourcePath, destPath);
+  const size = fs.statSync(destPath).size;
+  const musicFile = { path: destPath, name: `${preset.name}.mp3`, size, mimeType: "audio/mpeg" };
+  res.json(publicChannel(db.updateChannel(channel.id, { musicFile })!));
 });
 
 app.get("/api/videos/:id/thumbnail", (req, res) => {
