@@ -66,7 +66,7 @@ function ImageStudio({ channels }: { channels: Channel[] }) {
   const handleGenerate = () => {
     if (!prompt.trim()) return;
     run("generate", async () => {
-      // In YouTube Studio, images are created per channel/video.
+      // In Channel Planner, images are created per channel/video.
       // We can create a dedicated thumbnail/picture or guide user to attach to channel.
       setGeneratedImg(null);
       // Simulate/Trigger image preview

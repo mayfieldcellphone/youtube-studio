@@ -13,7 +13,8 @@ import { footageConfigured, voiceCharactersLeft, voiceConfigured } from "./media
 import { engineReady, geminiConfigured, listVoices, previewVoice, voiceFor, type VoiceEngine } from "./voices";
 import { ffmpegAvailable, isRendering, recoverInterruptedRenders, startRender } from "./render";
 import { cancelPipeline, inPipeline, recoverInterruptedPipelines, startPipeline } from "./pipeline";
-import { authUrl, completeAuth, redirectUri, syncChannel, uploadAndSchedule, youtubeConfigured } from "./youtube";
+import { authUrl, completeAuth, redirectUri, revokeAccess, syncChannel, uploadAndSchedule, youtubeConfigured } from "./youtube";
+import { privacyPage, termsPage } from "./legal";
 import { appUrl, describeSettings, keyProblems, loadSettings, saveSettings, SETTING_KEYS, wrongBox, type SettingKey } from "./settings";
 
 loadSettings();
@@ -55,6 +56,10 @@ const sessionToken = () => crypto.createHash("sha256").update(`session:${passwor
 const locked = () => ONLINE && !password();
 const loggedIn = (req: Request) => !locked() && (!password() || req.signedCookies.session === sessionToken());
 const logIn = (res: Response) => res.cookie("session", sessionToken(), { ...cookieOpts(), maxAge: 30 * 24 * 3600 * 1000 });
+
+// Public pages required by YouTube's API policies (no login needed).
+app.get("/privacy", (_req, res) => res.type("html").send(privacyPage()));
+app.get("/terms", (_req, res) => res.type("html").send(termsPage()));
 
 app.get("/api/status", (req, res) => {
   res.json({
@@ -274,8 +279,11 @@ app.get("/api/youtube/callback", async (req, res) => {
   }
 });
 
-app.post("/api/channels/:id/youtube/disconnect", (req, res) => {
-  getChannel(req.params.id);
+app.post("/api/channels/:id/youtube/disconnect", async (req, res) => {
+  const channel = getChannel(req.params.id);
+  // Revoke the app's access at Google and delete the stored YouTube data, as YouTube's policies require.
+  await revokeAccess(channel);
+  for (const v of db.videos(channel.id).filter((v) => v.stats)) db.updateVideo(v.id, { stats: undefined });
   res.json(publicChannel(db.updateChannel(req.params.id, { youtube: undefined, stats: undefined })!));
 });
 
@@ -668,10 +676,10 @@ recoverInterruptedPipelines();
 
 const server = app.listen(PORT, HOST, () => {
   if (ONLINE) {
-    console.log(`YouTube Studio is running on port ${PORT} (${appUrl()}).`);
+    console.log(`Channel Planner is running on port ${PORT} (${appUrl()}).`);
     if (locked()) console.warn("APP_PASSWORD is not set, so the app is locked. Add it to the host's variables.");
   } else {
-    console.log(`\n  YouTube Studio is running. Open http://localhost:${PORT} in your browser.\n  Keep this window open while you use the app.\n`);
+    console.log(`\n  Channel Planner is running. Open http://localhost:${PORT} in your browser.\n  Keep this window open while you use the app.\n`);
   }
 });
 

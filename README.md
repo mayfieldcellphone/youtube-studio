@@ -1,4 +1,4 @@
-# YouTube Studio
+# Channel Planner
 
 Plan, write and schedule videos for several YouTube channels from one place.
 
@@ -23,8 +23,8 @@ A kanban board per channel tracks each video from idea to scripted, ready, sched
 1. Install **Node.js 22 or newer** (the "LTS" download from [nodejs.org](https://nodejs.org)). This is a one-time step.
 2. Download this repo (green **Code** button → **Download ZIP**) and unzip it.
 3. Double-click the start file:
-   - **Windows:** `Start YouTube Studio (Windows).bat`
-   - **Mac:** `Start YouTube Studio (Mac).command`. The first time, right-click it → **Open** → **Open**, because macOS blocks downloaded scripts until you allow them.
+   - **Windows:** `Start Channel Planner (Windows).bat`
+   - **Mac:** `Start Channel Planner (Mac).command`. The first time, right-click it → **Open** → **Open**, because macOS blocks downloaded scripts until you allow them.
 4. The first start takes a few minutes. Your browser then opens the app at http://localhost:3000.
 5. Go to **Setup**, paste each key in its box and click **Save**. It works right away, with no restart and no files to edit.
 
@@ -100,6 +100,12 @@ FFmpeg comes with `npm install` (`ffmpeg-static`), so there's nothing extra to i
 
 - Videos uploaded through the API are locked **private** until your project passes Google's API audit. Request the audit from the YouTube API Services form linked in Google Cloud.
 - In "Testing" mode, logins expire after 7 days. Reconnect the channel when that happens, or publish the app in Google Auth Platform.
+
+### YouTube's rules
+
+The app follows YouTube's API policies: it publishes a privacy policy at `/privacy` and terms at `/terms` (public, no login), links the YouTube Terms of Service and Google Privacy Policy where you connect a channel, refreshes stored YouTube statistics every 30 minutes, and **Disconnect** revokes the app's Google access and deletes that channel's stored YouTube data. Set `APP_CONTACT_EMAIL` to show a contact address on those pages. Use `https://<your app address>/privacy` as the privacy policy link on Google's OAuth consent screen and in the YouTube API audit form.
+
+The AI follows YouTube's content policies when writing (original angles, no invented facts, no misleading titles, advertiser-friendly). You still review every video before it's scheduled.
 
 ### Security
 

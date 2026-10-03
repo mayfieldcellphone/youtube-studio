@@ -57,6 +57,16 @@ export async function completeAuth(channelId: string, code: string) {
   });
 }
 
+/** Revokes the channel's Google token. Best effort: the stored data is deleted either way. */
+export async function revokeAccess(channel: Channel) {
+  if (!channel.youtube?.refreshToken) return;
+  try {
+    await oauthClient().revokeToken(channel.youtube.refreshToken);
+  } catch (err) {
+    console.error(`Revoking Google access for ${channel.name} failed (deleting its data anyway): ${(err as Error).message}`);
+  }
+}
+
 function api(channel: Channel) {
   if (!channel.youtube) throw new Error("Connect this channel to YouTube first.");
   const auth = oauthClient();

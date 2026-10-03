@@ -12,7 +12,7 @@ export default function Login({ locked, onLogin }: { locked: boolean; onLogin: (
       <div className="flex min-h-screen items-center justify-center px-4">
         <div className="card w-full max-w-md space-y-3 text-sm">
           <div className="flex items-center gap-2 text-lg font-semibold">
-            <Clapperboard className="h-6 w-6 text-red-600" /> YouTube Studio
+            <Clapperboard className="h-6 w-6 text-red-600" /> Channel Planner
           </div>
           <p className="font-medium">This app is online, so it needs a password before anyone can use it.</p>
           <ol className="list-decimal space-y-1.5 pl-5">
@@ -43,7 +43,7 @@ export default function Login({ locked, onLogin }: { locked: boolean; onLogin: (
         }}
       >
         <div className="flex items-center gap-2 text-lg font-semibold">
-          <Clapperboard className="h-6 w-6 text-red-600" /> YouTube Studio
+          <Clapperboard className="h-6 w-6 text-red-600" /> Channel Planner
         </div>
         <div className="space-y-1">
           <label htmlFor="password">Password</label>

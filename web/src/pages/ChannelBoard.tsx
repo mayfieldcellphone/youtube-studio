@@ -411,6 +411,14 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
                 <a className="btn-primary" href={api.connectYouTubeUrl(channel.id)}>
                   <Link2 className="h-4 w-4" /> Connect YouTube
                 </a>
+              ) : null}
+              {status.youtube ? (
+                <p className="mt-3 text-xs text-zinc-500">
+                  This app uses YouTube API Services. By connecting, you agree to the{" "}
+                  <a className="underline" href="https://www.youtube.com/t/terms" target="_blank" rel="noreferrer">YouTube Terms of Service</a>; see the{" "}
+                  <a className="underline" href="https://policies.google.com/privacy" target="_blank" rel="noreferrer">Google Privacy Policy</a> and this app's{" "}
+                  <a className="underline" href="/privacy" target="_blank" rel="noreferrer">privacy policy</a>. Disconnect any time to revoke access and delete the stored YouTube data.
+                </p>
               ) : (
                 <a className="btn-secondary" href="#/setup">
                   Set up Google access first

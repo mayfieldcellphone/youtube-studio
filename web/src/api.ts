@@ -108,7 +108,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
     });
   } catch {
     throw new Error(
-      "The app isn't responding. Check that the black YouTube Studio window is still open. If it closed, double-click the Start file again, then reload this page.",
+      "The app isn't responding. Check that the black Channel Planner window is still open. If it closed, double-click the Start file again, then reload this page.",
     );
   }
   const data = await res.json().catch(() => ({}));

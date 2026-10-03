@@ -1,10 +1,10 @@
 #!/bin/bash
-# Double-click to start YouTube Studio on a Mac.
+# Double-click to start Channel Planner on a Mac.
 cd "$(dirname "$0")" || exit 1
 
 if ! command -v node >/dev/null 2>&1 || ! node -e "process.exit(Number(process.versions.node.split('.')[0]) < 22 ? 1 : 0)"; then
   echo
-  echo "  YouTube Studio needs Node.js version 22 or newer."
+  echo "  Channel Planner needs Node.js version 22 or newer."
   echo "  Your browser will now open the download page."
   echo "  Download the \"LTS\" version, install it, then double-click this file again."
   echo
@@ -14,7 +14,7 @@ if ! command -v node >/dev/null 2>&1 || ! node -e "process.exit(Number(process.v
 fi
 
 echo
-echo "  Getting YouTube Studio ready. The first time takes a few minutes..."
+echo "  Getting Channel Planner ready. The first time takes a few minutes..."
 echo
 if ! npm install --no-audit --no-fund --loglevel=error || ! npm run build --silent; then
   echo

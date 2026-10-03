@@ -1,5 +1,5 @@
 @echo off
-title YouTube Studio
+title Channel Planner
 cd /d "%~dp0"
 
 where node >nul 2>nul
@@ -8,7 +8,7 @@ node -e "process.exit(Number(process.versions.node.split('.')[0]) < 22 ? 1 : 0)"
 if errorlevel 1 goto nonode
 
 echo.
-echo  Getting YouTube Studio ready. The first time takes a few minutes...
+echo  Getting Channel Planner ready. The first time takes a few minutes...
 echo.
 call npm install --no-audit --no-fund --loglevel=error
 if errorlevel 1 goto failed
@@ -22,7 +22,7 @@ goto end
 
 :nonode
 echo.
-echo  YouTube Studio needs Node.js version 22 or newer.
+echo  Channel Planner needs Node.js version 22 or newer.
 echo  Your browser will now open the download page.
 echo  Download the "LTS" version, install it, then double-click this file again.
 echo.

@@ -108,13 +108,13 @@ export default function App() {
             <div className="min-w-0 flex-1">
               <div className="flex items-center justify-between">
                 <span className="font-display text-sm font-bold tracking-tight text-white">
-                  Studio Suite
+                  Channel Planner
                 </span>
                 <span className="rounded-full border border-white/10 bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-medium text-pink-300">
                   v{__APP_VERSION__}
                 </span>
               </div>
-              <p className="truncate text-[11px] text-zinc-400">YouTube Studio AI</p>
+              <p className="truncate text-[11px] text-zinc-400">Plan, make and schedule videos</p>
             </div>
           </div>
 
@@ -183,6 +183,12 @@ export default function App() {
               </div>
             </div>
           </nav>
+
+          <div className="flex gap-3 px-6 pb-2 text-[11px] text-zinc-500">
+            <a className="hover:text-zinc-300" href="/privacy" target="_blank" rel="noreferrer">Privacy</a>
+            <a className="hover:text-zinc-300" href="/terms" target="_blank" rel="noreferrer">Terms</a>
+            <a className="hover:text-zinc-300" href="https://www.youtube.com/t/terms" target="_blank" rel="noreferrer">YouTube Terms</a>
+          </div>
 
           {/* Bottom user / logout bar */}
           {status.passwordRequired && (
