@@ -600,7 +600,10 @@ app.post("/api/videos/:id/publish", (req, res) => {
   uploading.add(video.id);
   db.updateVideo(video.id, { error: undefined });
   uploadAndSchedule(video)
-    .catch((err: Error) => db.updateVideo(video.id, { status: "failed", error: err.message }))
+    .catch((err: Error) => {
+      console.error(`Uploading "${video.title}" to YouTube failed: ${err.message}`);
+      db.updateVideo(video.id, { status: "failed", error: err.message });
+    })
     .finally(() => uploading.delete(video.id));
   res.json({ ...publicVideo(db.video(video.id)!), uploading: true });
 });
@@ -650,6 +653,15 @@ if (PROD) {
   const vite = await createServer({ server: { middlewareMode: true }, appType: "spa" });
   app.use(vite.middlewares);
 }
+
+// Keep YouTube stats and scheduled videos' state fresh without a click, every 30 minutes.
+async function syncAllChannels() {
+  for (const channel of db.channels().filter((c) => c.youtube)) {
+    await syncChannel(channel).catch((err: Error) => console.error(`Syncing ${channel.name} with YouTube failed: ${err.message}`));
+  }
+}
+setInterval(syncAllChannels, 30 * 60 * 1000).unref();
+setTimeout(syncAllChannels, 60 * 1000).unref();
 
 recoverInterruptedRenders();
 recoverInterruptedPipelines();

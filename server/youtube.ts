@@ -107,6 +107,10 @@ export async function uploadAndSchedule(video: Video) {
 
   const youtubeVideoId = res.data.id;
   if (!youtubeVideoId) throw new Error("YouTube did not return a video ID.");
+  console.log(
+    `Uploaded "${video.title}" to YouTube (${youtubeVideoId}): ${res.data.status?.privacyStatus ?? "?"}` +
+      (publishAt ? `, publish at ${res.data.status?.publishAt ?? "not accepted"}` : ""),
+  );
 
   let thumbnailError: string | undefined;
   if (video.thumbnailFile) {
@@ -129,7 +133,14 @@ export async function uploadAndSchedule(video: Video) {
   });
 }
 
-/** Refreshes channel stats, per-video stats, and marks scheduled videos that have gone live. */
+/**
+ * Google keeps videos uploaded by apps it hasn't reviewed private, even when they are scheduled.
+ * Shown on a video whose publish time has passed while YouTube still has it as private.
+ */
+export const LOCKED_PRIVATE =
+  "YouTube kept this video private. Google only lets apps it has reviewed publish videos, and your Google Cloud project hasn't passed YouTube's API audit yet. To post it now: download the video below and upload it yourself in YouTube Studio (copy the title, description and tags from here), then delete the private copy. To fix it for good, request the audit: support.google.com/youtube/contact/yt_api_form";
+
+/** Refreshes channel stats, per-video stats, and marks scheduled videos that have gone live (or stayed private). */
 export async function syncChannel(channel: Channel) {
   const youtube = api(channel);
 
@@ -146,8 +157,12 @@ export async function syncChannel(channel: Channel) {
     for (const item of res.data.items ?? []) {
       const video = batch.find((v) => v.youtubeVideoId === item.id);
       if (!video) continue;
+      const isPublic = item.status?.privacyStatus === "public";
+      const overdue = video.status === "scheduled" && video.scheduledAt && Date.now() - new Date(video.scheduledAt).getTime() > 15 * 60 * 1000;
       db.updateVideo(video.id, {
-        status: item.status?.privacyStatus === "public" ? "published" : video.status,
+        status: isPublic ? "published" : video.status,
+        ...(isPublic && video.error === LOCKED_PRIVATE && { error: undefined }),
+        ...(!isPublic && overdue && { error: LOCKED_PRIVATE }),
         stats: {
           views: Number(item.statistics?.viewCount ?? 0),
           likes: Number(item.statistics?.likeCount ?? 0),

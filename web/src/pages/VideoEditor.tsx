@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, BookOpen, CalendarClock, Check, ExternalLink, Film, Image, Sparkles, Trash2, Upload, Wand2 } from "lucide-react";
+import { ArrowLeft, BookOpen, CalendarClock, Check, Copy, Download, ExternalLink, Film, Image, Sparkles, Trash2, Upload, Wand2 } from "lucide-react";
 import {
   aiFootageEstimate,
   picturesEstimate,
@@ -482,6 +482,12 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
       <Step n={6} title="Schedule on YouTube" done={onYouTube}>
         {onYouTube ? (
           <div className="space-y-3">
+            {video.error && (
+              <div className="space-y-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                <p>{video.error}</p>
+                {video.videoFile && <ManualUpload video={video} />}
+              </div>
+            )}
             <p className="flex items-center gap-2 text-sm">
               <Check className="h-4 w-4 text-green-600" />
               {video.status === "scheduled"
@@ -641,4 +647,32 @@ function uploadWithProgress(url: string, file: File, onProgress: (pct: number) =
     form.append("file", file);
     xhr.send(form);
   });
+}
+
+/** Download and copy buttons for posting a video by hand in YouTube Studio. */
+function ManualUpload({ video }: { video: Video }) {
+  const [copied, setCopied] = useState("");
+  const copy = (label: string, text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopied(label);
+  };
+  return (
+    <div className="flex flex-wrap gap-2">
+      <a className="btn-secondary" href={api.videoUrl(video)} download={`${video.title || "video"}.mp4`}>
+        <Download className="h-4 w-4" /> Download video
+      </a>
+      {[
+        ["Title", video.title],
+        ["Description", video.description],
+        ["Tags", video.tags.join(", ")],
+      ].map(([label, text]) => (
+        <button key={label} type="button" className="btn-ghost" onClick={() => copy(label, text)}>
+          {copied === label ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />} Copy {label.toLowerCase()}
+        </button>
+      ))}
+      <a className="btn-ghost" href="https://studio.youtube.com" target="_blank" rel="noreferrer">
+        <ExternalLink className="h-4 w-4" /> Open YouTube Studio
+      </a>
+    </div>
+  );
 }

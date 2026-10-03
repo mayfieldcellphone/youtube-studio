@@ -2,13 +2,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Channel, Research, Video } from "./db";
 import { google } from "./veo";
 
-const ANTHROPIC_MODELS = [
-  "claude-3-7-sonnet-20250219",
-  "claude-3-5-sonnet-20241022",
-  "claude-3-5-sonnet-latest",
-  "claude-3-5-haiku-20241022",
-  "claude-3-opus-20240229",
-];
+/** Current Claude model. If it declines a request, the API retries on Anthropic's recommended fallback model. */
+const CLAUDE_MODEL = "claude-opus-5-5";
+const CLAUDE_FALLBACK = { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const };
 
 const GEMINI_MODELS = [
   "gemini-2.5-flash",
@@ -102,32 +98,25 @@ async function generateWithGemini<T>(prompt: string, schema: Schema): Promise<T>
 async function generateWithAnthropic<T>(prompt: string, schema: Schema): Promise<T> {
   const c = anthropic();
   if (!c) throw new Error("ANTHROPIC_API_KEY is not configured.");
-  let lastErr: any;
-  for (const model of ANTHROPIC_MODELS) {
-    try {
-      const response = await c.beta.messages.create({
-        model,
-        max_tokens: 16000,
-        system: SYSTEM,
-        output_config: { format: { type: "json_schema", schema } },
-        messages: [{ role: "user", content: prompt }],
-      });
+  const response = await c.beta.messages.create({
+    model: CLAUDE_MODEL,
+    max_tokens: 16000,
+    ...CLAUDE_FALLBACK,
+    system: SYSTEM,
+    // Writing quality matters more than speed here; this model's default effort is medium.
+    output_config: { effort: "high", format: { type: "json_schema", schema } },
+    messages: [{ role: "user", content: prompt }],
+  });
 
-      if (response.stop_reason === "refusal") {
-        throw new Error("The AI declined this request. Try rewording the idea.");
-      }
-      if (response.stop_reason === "max_tokens") {
-        throw new Error("The AI response was cut off. Try again.");
-      }
-      const text = response.content.find((b) => b.type === "text");
-      if (!text || text.type !== "text") throw new Error("The AI returned no text.");
-      return JSON.parse(text.text) as T;
-    } catch (err: any) {
-      lastErr = err;
-      if (err.message?.includes("declined")) throw err;
-    }
+  if (response.stop_reason === "refusal") {
+    throw new Error("The AI declined this request. Try rewording the idea.");
   }
-  throw lastErr || new Error("Anthropic generation failed.");
+  if (response.stop_reason === "max_tokens") {
+    throw new Error("The AI response was cut off. Try again.");
+  }
+  const text = response.content.find((b) => b.type === "text");
+  if (!text || text.type !== "text") throw new Error("The AI returned no text.");
+  return JSON.parse(text.text) as T;
 }
 
 /** Calls Anthropic or Gemini with a JSON schema and returns the parsed result. */
@@ -205,8 +194,9 @@ async function searchWeb(prompt: string, maxSearches: number): Promise<Omit<Rese
           const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: prompt }];
           if (content.length) messages.push({ role: "assistant", content });
           response = await c.beta.messages.create({
-            model: ANTHROPIC_MODELS[0],
+            model: CLAUDE_MODEL,
             max_tokens: 16000,
+            ...CLAUDE_FALLBACK,
             system: SYSTEM,
             tools: [{ type: "web_search_20260209", name: "web_search", max_uses: maxSearches }],
             messages,
