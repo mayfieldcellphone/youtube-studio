@@ -87,6 +87,14 @@ function statsFrom(s?: { subscriberCount?: string | null; viewCount?: string | n
  * Uploads the video and hands scheduling to YouTube: the video is uploaded as private
  * with `publishAt`, and YouTube makes it public at that time even if this app is offline.
  */
+const DRAMATISATION_NOTE = "Contains dramatised scenes with AI voices.";
+
+/** Videos with acted character lines say so in the description, as well as in the video. */
+function withDisclosure(video: Video) {
+  if (!video.characterVoicesUsed || video.description.includes(DRAMATISATION_NOTE)) return video.description;
+  return `${video.description.trim()}\n\n${DRAMATISATION_NOTE}`.trim();
+}
+
 export async function uploadAndSchedule(video: Video) {
   const channel = db.channel(video.channelId);
   if (!channel) throw new Error("Channel not found.");
@@ -101,7 +109,7 @@ export async function uploadAndSchedule(video: Video) {
     requestBody: {
       snippet: {
         title: video.title.slice(0, 100),
-        description: video.description.slice(0, 5000),
+        description: withDisclosure(video).slice(0, 5000),
         tags: video.tags,
         categoryId: channel.categoryId || "22",
       },

@@ -304,6 +304,7 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
           {words} spoken words ≈ {Math.round(words / 2.5)} seconds
           {video.format === "short" && words / 2.5 > 60 && <span className="text-red-600"> (too long for a Short)</span>}
         </p>
+        <CastHint script={draft.script} cast={channel?.cast ?? []} channelId={channel?.id} />
       </Step>
 
       <Step n={4} title="Make the video" done={Boolean(video.videoFile) && !renderRunning}>
@@ -673,6 +674,45 @@ function ManualUpload({ video }: { video: Video }) {
       <a className="btn-ghost" href="https://studio.youtube.com" target="_blank" rel="noreferrer">
         <ExternalLink className="h-4 w-4" /> Open YouTube Studio
       </a>
+    </div>
+  );
+}
+
+/**
+ * Shows how to write character lines when the channel has a cast, and warns about speaker
+ * labels in the script that have no voice yet (the narrator would read them).
+ */
+function CastHint({ script, cast, channelId }: { script: string; cast: { name: string; voiceId: string }[]; channelId?: string }) {
+  const key = (name: string) => name.trim().toUpperCase().replace(/\s+/g, " ");
+  const voiced = new Set(cast.filter((c) => c.voiceId).map((c) => key(c.name)));
+  const labels = new Set(
+    script
+      .split(/\n+/)
+      .map((line) => /^\s*([A-Z][A-Z .'’-]{0,39}):/.exec(line)?.[1])
+      .filter((label): label is string => Boolean(label))
+      .map(key)
+      .filter((label) => label !== "NARRATOR"),
+  );
+  const missing = [...labels].filter((label) => !voiced.has(label));
+  if (!voiced.size && !labels.size) return null;
+  return (
+    <div className="mt-2 space-y-1 text-xs text-zinc-500">
+      {voiced.size > 0 && (
+        <p>
+          Character lines: start a line with a cast name in capitals, e.g. <code>{[...voiced][0]}: [firm] I deny it entirely.</code> Cast:{" "}
+          {[...voiced].join(", ")}.
+        </p>
+      )}
+      {missing.length > 0 && (
+        <p className="text-amber-700 dark:text-amber-400">
+          No voice for {missing.join(", ")}: the narrator will read {missing.length > 1 ? "those lines" : "that line"}. Add{" "}
+          {missing.length > 1 ? "them" : "it"} to the cast under{" "}
+          <a className="underline" href={`#/channels/${channelId ?? ""}/edit`}>
+            Edit channel
+          </a>
+          .
+        </p>
+      )}
     </div>
   );
 }

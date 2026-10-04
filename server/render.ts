@@ -5,8 +5,9 @@ import { spawn } from "node:child_process";
 import ffmpegPath from "ffmpeg-static";
 import { db, UPLOAD_DIR, WORK_DIR, type VideoLook } from "./db";
 import { planScenes } from "./ai";
-import { download, findFootage, type Footage, type Word } from "./media";
-import { synthesizeScenes, voiceFor } from "./voices";
+import { download, findFootage, voiceConfigured, type Footage, type Word } from "./media";
+import { synthesizeScenes, voiceFor, type CharacterLine } from "./voices";
+import { castVoice, NARRATOR } from "./speakers";
 import { CLIP_SECONDS, makeClips } from "./veo";
 import { DEFAULT_PICTURE_STYLES, makePictures } from "./images";
 
@@ -73,12 +74,28 @@ async function render(videoId: string) {
     const n = scenes.length;
 
     // 1. Voiceover for each scene (per-scene audio gives exact scene lengths and caption timings).
+    //    Scenes spoken by a character use that character's ElevenLabs voice from the channel's cast.
+    const notes: string[] = [];
+    const unvoiced = new Set<string>();
+    const characters: (CharacterLine | undefined)[] = scenes.map((scene) => {
+      if (scene.speaker === NARRATOR) return undefined;
+      const member = castVoice(channel, scene.speaker);
+      if (!member) unvoiced.add(scene.speaker);
+      return member && { voiceId: member.voiceId, delivery: scene.delivery };
+    });
+    if (characters.some(Boolean) && !voiceConfigured()) {
+      throw new Error("This script has character lines, which are voiced by ElevenLabs. Add your ElevenLabs key on the Setup page, or remove the speaker labels from the script.");
+    }
+    for (const name of unvoiced) {
+      notes.push(`No voice is set for ${name}, so the narrator read those lines. Add ${name} to the cast under Edit channel.`);
+    }
     const voice = voiceFor(channel);
     const narrated = await synthesizeScenes(
       scenes.map((s) => s.narration),
       voice,
       path.join(work, "voice"),
       (done, total) => stage(`Recording voiceover (${done + 1}/${total})`, 6 + (29 * done) / total),
+      characters,
     );
     const voices = narrated.map((v) => ({ ...v, duration: Math.max(v.duration, 0.5) + GAP }));
 
@@ -113,7 +130,6 @@ async function render(videoId: string) {
     const total = elapsed;
 
     // 3a. AI shots from Veo; any that fail fall back to stock footage below.
-    const notes: string[] = [];
     const aiFiles = new Map<number, string>();
     const aiShots = shots.flatMap((s, i) => (s.aiPrompt ? [i] : []));
     if (aiShots.length) {
@@ -217,7 +233,10 @@ async function render(videoId: string) {
     for (const font of fs.readdirSync(FONT_DIR).filter((f) => /\.(ttf|otf)$/i.test(f))) {
       fs.copyFileSync(path.join(FONT_DIR, font), path.join(work, "fonts", font));
     }
-    fs.writeFileSync(path.join(work, "captions.ass"), buildCaptions(voices, portrait, W, H));
+    fs.writeFileSync(
+      path.join(work, "captions.ass"),
+      buildCaptions(voices.map((v, i) => ({ ...v, dramatised: Boolean(characters[i]) })), portrait, W, H),
+    );
 
     const music = channel.musicFile && fs.existsSync(channel.musicFile.path) ? channel.musicFile.path : null;
     const fadeOut = Math.max(0, total - 2.5).toFixed(2);
@@ -254,8 +273,9 @@ async function render(videoId: string) {
     db.updateVideo(videoId, {
       videoFile: { path: output, name: `${slug(video.title)}.mp4`, size, mimeType: "video/mp4" },
       status: ["idea", "scripted"].includes(video.status) ? "ready" : video.status,
-      // Realistic AI video and pictures both need YouTube's altered/synthetic content label.
-      aiFootageUsed: aiFiles.size > 0 || pictureFiles.size > 0,
+      // Realistic AI video, pictures and character voices all need YouTube's altered/synthetic content label.
+      aiFootageUsed: aiFiles.size > 0 || pictureFiles.size > 0 || characters.some(Boolean),
+      characterVoicesUsed: characters.some(Boolean),
       render: { ...video.render!, stage: "Done", progress: 100, notes, finishedAt: new Date().toISOString() },
     });
     if (previous) fs.rm(previous.path, { force: true }, () => {});
@@ -347,18 +367,35 @@ const WHITE = "&H00FFFFFF&";
  * Word-timed captions. Shorts: 3 big words at a time with the spoken word in gold and a small
  * pop when a new line appears. Long videos: clean subtitle lines.
  */
-function buildCaptions(voices: { words: Word[]; duration: number }[], portrait: boolean, W: number, H: number) {
+export function buildCaptions(
+  voices: { words: Word[]; duration: number; dramatised?: boolean }[],
+  portrait: boolean,
+  W: number,
+  H: number,
+) {
   const perLine = portrait ? 3 : 7;
   const style = portrait
     ? "Style: Default,Anton,118,&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,0,0,0,0,100,100,1,0,1,7,3,5,60,60,0,1"
     : "Style: Default,Anton,72,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,0,0,0,0,100,100,1,0,1,4,1,2,120,120,70,1";
+  const labelStyle = portrait
+    ? "Style: Label,Anton,52,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,0,0,0,0,100,100,4,0,3,10,0,7,60,60,200,1"
+    : "Style: Label,Anton,30,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,0,0,0,0,100,100,3,0,3,8,0,7,60,60,50,1";
   const clean = (t: string) => {
     const text = t.replace(/[{}\\]/g, "");
     return portrait ? text.toUpperCase() : text;
   };
   const lines: string[] = [];
   let offset = 0;
-  for (const voice of voices) {
+  // A small "DRAMATISATION" label in the top corner while a character speaks.
+  const label = (start: number, end: number) =>
+    `Dialogue: 1,${assTime(start)},${assTime(end)},Label,,0,0,0,,DRAMATISATION`;
+  for (const [scene, voice] of voices.entries()) {
+    if (voice.dramatised && !voices[scene - 1]?.dramatised) {
+      // One label across consecutive character scenes.
+      let end = offset;
+      for (let k = scene; k < voices.length && voices[k].dramatised; k++) end += voices[k].duration;
+      lines.push(label(offset, end));
+    }
     for (let i = 0; i < voice.words.length; i += perLine) {
       const chunk = voice.words.slice(i, i + perLine);
       const next = voice.words[i + perLine];
@@ -390,6 +427,7 @@ WrapStyle: 0
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 ${style}
+${labelStyle}
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

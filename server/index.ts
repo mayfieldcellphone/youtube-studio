@@ -213,6 +213,16 @@ const channelInput = z.object({
   aiFootage: z.enum(["off", "hook", "key", "all"]).optional(),
   aiQuality: z.enum(["fast", "best"]).optional(),
   affiliateLinks: z.string().max(3000).optional(),
+  cast: z
+    .array(
+      z.object({
+        // Becomes the script label, e.g. "Joan" for lines starting "JOAN:".
+        name: z.string().trim().min(1).max(40).regex(/^[A-Za-z][A-Za-z .'’-]*$/, "Character names can use letters, spaces, dots, apostrophes and hyphens."),
+        voiceId: z.string().trim().min(1).max(100),
+      }),
+    )
+    .max(20)
+    .optional(),
 });
 
 app.get("/api/channels", (_req, res) => {
@@ -537,7 +547,7 @@ app.post("/api/videos/:id/files/:kind", upload.single("file"), (req, res) => {
   let patch: Partial<Video>;
   if (kind === "video") {
     if (!file.mimetype.startsWith("video/")) return reject("Please choose a video file (MP4 or MOV).");
-    patch = { videoFile: stored, aiFootageUsed: false, status: ["idea", "scripted"].includes(video.status) ? "ready" : video.status };
+    patch = { videoFile: stored, aiFootageUsed: false, characterVoicesUsed: false, status: ["idea", "scripted"].includes(video.status) ? "ready" : video.status };
     if (video.videoFile) fs.rm(video.videoFile.path, { force: true }, () => {});
   } else if (kind === "thumbnail") {
     if (!["image/jpeg", "image/png"].includes(file.mimetype)) return reject("Thumbnails must be JPG or PNG.");

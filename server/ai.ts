@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Channel, Research, Video } from "./db";
 import { google } from "./veo";
+import { NARRATOR, parseLine, scriptSpeakers, speakerKey } from "./speakers";
 
 /** Current Claude model. If it declines a request, the API retries on Anthropic's recommended fallback model. */
 const CLAUDE_MODEL = "claude-opus-5-5";
@@ -336,6 +337,23 @@ VOICE AND STYLE (this is narration for a voiceover, so write for the ear):
 - Put visual directions on their own line in [square brackets]; they are not read aloud.`;
 }
 
+/**
+ * When the channel has a cast of character voices, scripts may include short dramatised
+ * scenes in which those characters speak (see speakers.ts for the format).
+ */
+function castCraft(channel: Channel) {
+  const names = (channel.cast ?? []).filter((c) => c.voiceId).map((c) => speakerKey(c.name));
+  if (!names.length) return "";
+  return `
+
+CHARACTER VOICES (this channel has actors for these speakers: ${names.join(", ")}):
+- You may add 2-4 short dramatised scenes where real people from the story speak in their own voice. Keep character lines to about 20-30% of the spoken words; the narrator carries the story.
+- Write each spoken character line on its own line, starting with the speaker label in capitals and a colon, and optionally one delivery cue in square brackets: "JOAN: [firm] I deny it entirely."
+- Only use speaker labels from this list: ${names.join(", ")}, plus NARRATOR. Lines with no label are read by the narrator.
+- Use words actually recorded in the research (trial records, letters, inscriptions) wherever they exist. Invented lines must be short, plausible for the person and the era, and never presented as a quote. Just before each scene, the narrator signals it is a reconstruction ("Imagine the courtroom that morning.").
+- Delivery cues are one or two words describing how the line is spoken (firm, whispering, afraid, cold, laughing). Visual directions stay on their own line in [square brackets] with no label.`;
+}
+
 export async function generateScript(channel: Channel, video: Video) {
   const research = video.research
     ? `\nResearch notes (base every fact on these; say "reportedly" or "some believe" for anything marked Disputed or Theory, and respect the CAUTION section):\n${video.research.notes}\n`
@@ -348,7 +366,7 @@ ${videoBrief(video)}
 ${research}
 Write the full narration script for this video, ready to be read aloud by a voiceover.
 
-${scriptCraft(video)}`,
+${scriptCraft(video)}${castCraft(channel)}`,
     obj({ script: str("The complete script") }),
   );
 
@@ -367,7 +385,7 @@ Judge it as a viewer scrolling at midnight: would they stop at line 1, and still
 Then rewrite the whole script to fix them. Keep every fact accurate, keep it the right length, and make every line earn its place.
 
 The standard it must meet:
-${scriptCraft(video)}`,
+${scriptCraft(video)}${castCraft(channel)}`,
     obj({ problems: str("Short list of what was wrong"), script: str("The improved complete script") }),
   );
   return edited.script;
@@ -404,6 +422,10 @@ Write the YouTube upload details for this video:
 
 export interface Scene {
   narration: string;
+  /** Who speaks this scene: NARRATOR, or a speaker label from the script such as "JOAN" */
+  speaker: string;
+  /** Delivery cue for a character line ("firm", "whispering"), or empty */
+  delivery: string;
   /** A cinematic shot description for an AI video model (Veo). */
   aiPrompt: string;
   /** The biggest reveal or emotional peak of the video. */
@@ -474,7 +496,9 @@ async function planPart(channel: Channel, video: Video, parts: string[], index: 
 ${script}
 
 Turn this script into scenes for an automatically edited ${video.format === "short" ? "vertical YouTube Short" : "horizontal YouTube video"}.
-- "narration": the exact words the narrator says in this scene, copied from the script in order. Remove anything in [square brackets] and any speaker labels. Together, the scenes must contain the whole spoken script.
+- "narration": the exact words spoken in this scene, copied from the script in order. Remove visual directions in [square brackets] and any speaker labels. Together, the scenes must contain the whole spoken script.
+- "speaker": who speaks the scene. A script line that starts with a capitalised label and a colon ("JOAN: I deny it.") is spoken by that character: give it its own scene with "speaker" set to the label exactly as written ("JOAN"). Every other line is "${NARRATOR}". Never put two speakers in one scene.
+- "delivery": for a character line, the cue in [square brackets] straight after the speaker label ("firm" for "JOAN: [firm] ..."), without brackets; otherwise "".
 - Keep each scene to 1-2 sentences.
 - "shots": the visuals for the scene, one per ${pace} seconds of speech (1-3 shots per scene), so the picture changes often like a real edit. Each shot has:
   - "search": 2-5 English words to search a stock video library (Pexels). Something filmable, concrete and atmospheric ("candle flickering in dark room", "fog rolling over pine forest", "hands turning old book pages"), not abstract ideas or names of real people. For historical stories prefer old, timeless or vintage-looking subjects and avoid modern cars, phones or modern clothes.
@@ -489,6 +513,8 @@ Turn this script into scenes for an automatically edited ${video.format === "sho
       type: "array",
       items: obj({
         narration: str("Spoken words for this scene"),
+        speaker: str(`${NARRATOR}, or the character's speaker label from the script`),
+        delivery: str("Delivery cue for a character line, or empty"),
         shots: {
           type: "array",
           items: obj({ search: str("Stock footage search"), picture: str("AI picture description of this exact moment") }),
@@ -499,10 +525,29 @@ Turn this script into scenes for an automatically edited ${video.format === "sho
       }),
     },
   }));
+  const speakers = new Set(scriptSpeakers(video.script));
   return result.scenes
+    .map((s) => withSpeaker(s, speakers))
     .filter((s) => s.narration.trim())
     .map((s) => ({ ...s, shots: s.shots.filter((q) => q.search.trim() || q.picture.trim()).slice(0, 3) }))
     .map((s) => ({ ...s, shots: s.shots.length ? s.shots : [{ search: s.fallbackQuery, picture: s.aiPrompt }] }));
+}
+
+/**
+ * Settles who speaks a planned scene. A label the AI left in the narration wins; a speaker
+ * that never appears as a label in the script falls back to the narrator.
+ */
+function withSpeaker(scene: Scene, speakers: Set<string>): Scene {
+  const parsed = parseLine(scene.narration ?? "");
+  // Only strip a leading "WORD:" when it really is a speaker in this script.
+  const line =
+    speakers.has(parsed.speaker) || parsed.speaker === NARRATOR
+      ? parsed
+      : { speaker: NARRATOR, delivery: "", text: (scene.narration ?? "").trim() };
+  let speaker = line.speaker !== NARRATOR ? line.speaker : speakerKey(scene.speaker || NARRATOR);
+  let delivery = line.delivery || (scene.delivery ?? "").replace(/[[\]]/g, "").trim();
+  if (!speakers.has(speaker)) [speaker, delivery] = [NARRATOR, ""];
+  return { ...scene, narration: line.text, speaker, delivery: speaker === NARRATOR ? "" : delivery };
 }
 
 export interface SeriesEpisode {

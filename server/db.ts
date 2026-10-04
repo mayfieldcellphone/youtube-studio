@@ -54,9 +54,21 @@ export interface Channel {
   aiQuality?: "fast" | "best";
   /** Background music mixed quietly under the narration */
   musicFile?: StoredFile;
+  /**
+   * Characters who speak in dramatised scenes, each with their own ElevenLabs voice.
+   * Script lines that start with a matching label ("JOAN: I deny it.") use that voice.
+   */
+  cast?: CastMember[];
   youtube?: YouTubeLink;
   stats?: { subscribers: number; views: number; videos: number; updatedAt: string };
   createdAt: string;
+}
+
+export interface CastMember {
+  /** Speaker label used in scripts, e.g. "Joan" for lines starting "JOAN:" */
+  name: string;
+  /** ElevenLabs voice ID (a library, Voice Design or cloned voice) */
+  voiceId: string;
 }
 
 export interface StoredFile {
@@ -109,6 +121,8 @@ export interface Video {
   render?: RenderJob;
   /** The last made video contains AI-generated footage (disclosed to YouTube on upload). */
   aiFootageUsed?: boolean;
+  /** The last made video has dramatised scenes voiced by AI characters (disclosed on upload). */
+  characterVoicesUsed?: boolean;
   pipeline?: PipelineJob;
   titleOptions: string[];
   description: string;

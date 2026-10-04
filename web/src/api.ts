@@ -23,9 +23,16 @@ export interface Channel {
   aiFootage?: "off" | "hook" | "key" | "all";
   aiQuality?: "fast" | "best";
   musicFile?: FileInfo;
+  /** Characters who speak in dramatised scenes, each with an ElevenLabs voice */
+  cast?: CastMember[];
   youtube?: { channelId: string; title: string; thumbnail?: string; connectedAt: string };
   stats?: { subscribers: number; views: number; videos: number; updatedAt: string };
   createdAt: string;
+}
+
+export interface CastMember {
+  name: string;
+  voiceId: string;
 }
 
 export interface FileInfo {
@@ -47,6 +54,7 @@ export interface Video {
   research?: { notes: string; sources: { title: string; url: string }[]; createdAt: string };
   render?: { stage: string; progress: number; error?: string; notes?: string[]; startedAt: string; finishedAt?: string };
   aiFootageUsed?: boolean;
+  characterVoicesUsed?: boolean;
   pipeline?: { stopAfter: StopAfter; step: string; result?: string; error?: string; startedAt: string; finishedAt?: string };
   titleOptions: string[];
   description: string;

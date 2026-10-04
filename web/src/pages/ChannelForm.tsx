@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { api, CATEGORIES, DAY_NAMES, type Channel, type Voice, type VoiceEngine } from "../api";
 import { navigate, useApp } from "../App";
 import { ErrorBox, PageHeader, Spinner, useAction } from "../components/ui";
@@ -53,6 +53,8 @@ const PRESETS = [
 export default function ChannelForm({ channelId }: { channelId?: string }) {
   const { channels, reloadChannels, status } = useApp();
   const [voices, setVoices] = useState<Voice[]>([]);
+  // Character voices always come from ElevenLabs, whatever engine the narrator uses.
+  const [castVoices, setCastVoices] = useState<Voice[]>([]);
   const existing = channels.find((c) => c.id === channelId);
   const [form, setForm] = useState<Omit<Channel, "id" | "createdAt" | "youtube" | "stats">>(
     existing ? { ...EMPTY, ...existing } : EMPTY,
@@ -79,6 +81,11 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
       .catch(() => {});
   }, [engine, engineReady]);
 
+  useEffect(() => {
+    if (!status.voice) return;
+    api.voices("elevenlabs").then(setCastVoices).catch(() => {});
+  }, [status.voice]);
+
   if (channelId && !existing) return <p className="muted">Channel not found.</p>;
 
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) => setForm((f) => ({ ...f, [key]: value }));
@@ -87,7 +94,10 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
 
   const save = () =>
     run("save", async () => {
-      const saved = existing ? await api.updateChannel(existing.id, form) : await api.createChannel(form);
+      // Rows without a name or a voice are left out rather than blocking the save.
+      const cast = (form.cast ?? []).map((c) => ({ name: c.name.trim(), voiceId: c.voiceId })).filter((c) => c.name && c.voiceId);
+      const body = { ...form, cast };
+      const saved = existing ? await api.updateChannel(existing.id, body) : await api.createChannel(body);
       await reloadChannels();
       navigate(`/channels/${saved.id}`);
     });
@@ -217,6 +227,12 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
             />
           </Field>
         )}
+        <CastEditor
+          cast={form.cast ?? []}
+          voices={castVoices}
+          ready={status.voice}
+          onChange={(cast) => set("cast", cast)}
+        />
         <Field label="Video look" hint="The color style of videos the app makes automatically.">
           <select value={form.look ?? "clean"} onChange={(e) => set("look", e.target.value as Channel["look"])}>
             <option value="cinematic">Cinematic: dark and moody, with a vignette (history, mystery, true crime)</option>
@@ -476,5 +492,77 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
       {children}
       {hint && <p className="text-xs text-zinc-500">{hint}</p>}
     </div>
+  );
+}
+
+/**
+ * Characters who speak in dramatised scenes. Each gets an ElevenLabs voice (a library voice,
+ * one made with Voice Design, or a cloned voice). Script lines starting with the name in
+ * capitals ("JOAN: I deny it entirely.") are spoken in that voice.
+ */
+function CastEditor({
+  cast,
+  voices,
+  ready,
+  onChange,
+}: {
+  cast: { name: string; voiceId: string }[];
+  voices: Voice[];
+  ready: boolean;
+  onChange: (cast: { name: string; voiceId: string }[]) => void;
+}) {
+  const update = (i: number, patch: Partial<{ name: string; voiceId: string }>) =>
+    onChange(cast.map((c, k) => (k === i ? { ...c, ...patch } : c)));
+  return (
+    <Field
+      label="Character voices (optional)"
+      hint="For dramatised scenes where people from the story speak. In a script, start a line with the name in capitals, e.g. JOAN: [firm] I deny it entirely. The AI writer uses these characters too. Voiced by ElevenLabs; videos with characters are labelled as dramatisations and disclosed to YouTube as AI content."
+    >
+      {!ready ? (
+        <p className="text-xs text-amber-700 dark:text-amber-400">
+          Add your ElevenLabs key on the <a className="underline" href="#/setup">Setup</a> page to give characters their own voices.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {cast.map((member, i) => (
+            <div key={i} className="flex flex-wrap gap-2">
+              <input
+                className="w-40"
+                value={member.name}
+                maxLength={40}
+                placeholder="e.g. Joan"
+                onChange={(e) => update(i, { name: e.target.value })}
+              />
+              <select className="min-w-0 flex-1" value={member.voiceId} onChange={(e) => update(i, { voiceId: e.target.value })}>
+                <option value="">Choose a voice…</option>
+                {member.voiceId && !voices.some((v) => v.id === member.voiceId) && (
+                  <option value={member.voiceId}>Saved voice ({member.voiceId})</option>
+                )}
+                {voices.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name}
+                    {v.description ? ` (${v.description})` : ""}
+                  </option>
+                ))}
+              </select>
+              <button type="button" className="btn-secondary" aria-label={`Remove ${member.name || "character"}`} onClick={() => onChange(cast.filter((_, k) => k !== i))}>
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={cast.length >= 20}
+            onClick={() => onChange([...cast, { name: "", voiceId: "" }])}
+          >
+            <Plus className="h-4 w-4" /> Add character
+          </button>
+          <p className="text-xs text-zinc-500">
+            New voices you make in ElevenLabs (Voice Design or Instant Voice Clone) appear in this list after you reload the page.
+          </p>
+        </div>
+      )}
+    </Field>
   );
 }

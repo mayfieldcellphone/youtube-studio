@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DATA_DIR, type Channel } from "./db";
-import { DEFAULT_VOICE_ID, elevenSpeak, listVoices as listElevenVoices, voiceConfigured as elevenConfigured, type Word } from "./media";
+import { DEFAULT_VOICE_ID, ELEVEN_ACTING_MODEL, elevenSpeak, listVoices as listElevenVoices, voiceConfigured as elevenConfigured, type Word } from "./media";
 
 /**
  * Narration engines. Each channel picks one:
@@ -73,37 +73,53 @@ export interface SceneAudio {
   duration: number;
 }
 
+/** A scene spoken by a character from the channel's cast instead of the narrator. */
+export interface CharacterLine {
+  /** ElevenLabs voice ID */
+  voiceId: string;
+  /** Delivery cue such as "firm" or "whispering" */
+  delivery?: string;
+}
+
 /**
  * Narrates a list of scenes. Gemini and Kokoro read several scenes at once (up to about 45
  * seconds of speech), so the delivery flows and builds like one continuous narration
  * instead of restarting every sentence. The audio is then cut back into scenes at the
  * quietest moment near each scene boundary.
+ *
+ * Scenes with an entry in `characters` are acted by that character's ElevenLabs voice,
+ * whatever engine the narrator uses.
  */
 export async function synthesizeScenes(
   texts: string[],
   voice: VoiceChoice,
   outBase: string,
   onProgress: (done: number, total: number) => void,
+  characters: (CharacterLine | undefined)[] = [],
 ): Promise<SceneAudio[]> {
   const results: SceneAudio[] = [];
-  if (voice.engine === "elevenlabs") {
-    for (const [i, text] of texts.entries()) {
-      onProgress(i, texts.length);
-      results.push(await synthesize(text, voice, `${outBase}-${i}`));
-    }
-    return results;
-  }
 
-  const chunks: number[][] = [];
+  // Steps: each character scene on its own; narrator scenes one by one (ElevenLabs) or grouped.
+  const steps: number[][] = [];
   for (const [i, text] of texts.entries()) {
-    const last = chunks[chunks.length - 1];
+    const last = steps[steps.length - 1];
+    const groupable = voice.engine !== "elevenlabs" && !characters[i] && last && !characters[last[0]];
     const length = last ? last.reduce((n, j) => n + texts[j].length + 1, 0) : Infinity;
-    if (last && length + text.length <= MAX_CHUNK_CHARS) last.push(i);
-    else chunks.push([i]);
+    if (groupable && length + text.length <= MAX_CHUNK_CHARS) last.push(i);
+    else steps.push([i]);
   }
 
-  for (const [c, scenes] of chunks.entries()) {
-    onProgress(c, chunks.length);
+  for (const [c, scenes] of steps.entries()) {
+    onProgress(c, steps.length);
+    const character = characters[scenes[0]];
+    if (character) {
+      results[scenes[0]] = await speakCharacter(texts[scenes[0]], character, `${outBase}-${scenes[0]}`);
+      continue;
+    }
+    if (voice.engine === "elevenlabs") {
+      results[scenes[0]] = await synthesize(texts[scenes[0]], voice, `${outBase}-${scenes[0]}`);
+      continue;
+    }
     const text = scenes.map((i) => texts[i]).join(" ");
     const raw = voice.engine === "gemini" ? await geminiSpeak(text, voice) : await kokoroSpeak(text, voice.voiceId || DEFAULT_KOKORO);
     const samples = raw.samples instanceof Float32Array ? raw.samples : Float32Array.from(raw.samples, (v) => v / 32768);
@@ -118,6 +134,28 @@ export async function synthesizeScenes(
   }
   return results;
 }
+
+/**
+ * A character's line in their own voice. Eleven v3 acts the [delivery] cue; if this account
+ * can't use v3, the line is read with the narration model without the cue.
+ */
+export async function speakCharacter(text: string, line: CharacterLine, outBase: string): Promise<SceneAudio> {
+  const file = `${outBase}.mp3`;
+  const cue = line.delivery?.replace(/[[\]]/g, "").trim();
+  if (!actingModelFailed) {
+    try {
+      return { file, ...(await elevenSpeak(cue ? `[${cue}] ${text}` : text, line.voiceId, file, ELEVEN_ACTING_MODEL)) };
+    } catch (err) {
+      console.warn(`Eleven v3 unavailable for character lines, using the narration model: ${(err as Error).message}`);
+      // Don't try v3 again for every line of this video; retry on the next one.
+      actingModelFailed = true;
+      setTimeout(() => (actingModelFailed = false), 10 * 60 * 1000).unref();
+    }
+  }
+  return { file, ...(await elevenSpeak(text, line.voiceId, file)) };
+}
+
+let actingModelFailed = false;
 
 const MAX_CHUNK_CHARS = 700;
 
