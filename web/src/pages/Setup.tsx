@@ -84,7 +84,7 @@ export default function Setup() {
       <Section ok={status.voice} title="2b. ElevenLabs voice (optional)">
         <ol className="list-decimal space-y-1.5 pl-5">
           <li>Sign up at <Ext href="https://elevenlabs.io">elevenlabs.io</Ext>. The free plan is enough to test; the Starter plan (about $5/month) covers several videos a week.</li>
-          <li>Click your profile → <b>API Keys</b> → <b>Create API Key</b>. Allow <b>Text to Speech</b>, <b>Voices</b> (read) and <b>User</b> (read), then copy it.</li>
+          <li>Click your profile → <b>API Keys</b> → <b>Create API Key</b>. Allow <b>Text to Speech</b>, <b>Voices</b> (read and write) and <b>User</b> (read), plus <b>Text to Voice</b> if it's listed, then copy it. Write access and Text to Voice let the app design character voices for you.</li>
         </ol>
         {field("ELEVENLABS_API_KEY", "ElevenLabs API key", "sk_…")}
         {voiceUsage && voiceUsage.limit > 0 && (

@@ -43,7 +43,7 @@ function elevenError(status: number, body: string) {
     return "ElevenLabs blocked free-plan use from this connection (\"unusual activity\"). This happens with VPNs or several free accounts. Turn off any VPN, or upgrade to a paid ElevenLabs plan. Your key is fine.";
   }
   if (text.includes("permission")) {
-    return `ElevenLabs: your API key is missing a permission. In ElevenLabs → API Keys, edit the key and allow Text to Speech, Voices (read) and User (read). (${message})`;
+    return `ElevenLabs: your API key is missing a permission. In ElevenLabs → API Keys, edit the key and allow Text to Speech, Voices (read and write) and User (read), plus Text to Voice if it is listed (needed to design character voices). (${message})`;
   }
   if (text.includes("invalid_api_key") || text.includes("invalid api key") || (status === 401 && !reason)) {
     return "Your ElevenLabs API key was rejected. Create a new key in ElevenLabs → API Keys and paste it on the Setup page.";
@@ -85,6 +85,57 @@ export async function listVoices(): Promise<Voice[]> {
       .join(", "),
     previewUrl: v.preview_url ?? undefined,
   }));
+}
+
+export interface DesignedVoice {
+  /** Pass to createDesignedVoice to keep this voice */
+  generatedVoiceId: string;
+  /** A short sample, as a data: URL the browser can play */
+  audio: string;
+}
+
+/**
+ * ElevenLabs Voice Design: makes new voices from a description and returns a few previews
+ * to choose from. Nothing is saved to the account until createDesignedVoice is called.
+ */
+export async function designVoice(description: string, text: string): Promise<DesignedVoice[]> {
+  const body = (model: string) =>
+    JSON.stringify({
+      voice_description: description.trim().slice(0, 1000),
+      // Voice Design reads 100-1000 characters; for a shorter line it writes its own sample.
+      ...(text.trim().length >= 100 ? { text: text.trim().slice(0, 1000) } : { auto_generate_text: true }),
+      model_id: model,
+    });
+  let data: any;
+  try {
+    // v3 voices act audio tags best, which the character lines use.
+    data = await eleven("/v1/text-to-voice/design?output_format=mp3_44100_128", { method: "POST", body: body("eleven_ttv_v3") });
+  } catch (err) {
+    if (/quota|credits|permission|rejected|blocked/i.test((err as Error).message)) throw err;
+    data = await eleven("/v1/text-to-voice/design?output_format=mp3_44100_128", {
+      method: "POST",
+      body: body("eleven_multilingual_ttv_v2"),
+    });
+  }
+  return (data.previews ?? []).map((p: any) => ({
+    generatedVoiceId: p.generated_voice_id,
+    audio: `data:${p.media_type || "audio/mpeg"};base64,${p.audio_base_64 ?? p.audio_base64}`,
+  }));
+}
+
+/** Saves a designed voice to the ElevenLabs account and returns its voice ID. */
+export async function createDesignedVoice(name: string, description: string, generatedVoiceId: string) {
+  const data = await eleven("/v1/text-to-voice", {
+    method: "POST",
+    body: JSON.stringify({
+      voice_name: name.slice(0, 100),
+      voice_description: description.trim().padEnd(20, ".").slice(0, 1000),
+      generated_voice_id: generatedVoiceId,
+      labels: { use_case: "characters" },
+    }),
+  });
+  if (!data.voice_id) throw new Error("ElevenLabs didn't return the new voice. Try again.");
+  return String(data.voice_id);
 }
 
 export interface Word {

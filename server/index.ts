@@ -8,8 +8,8 @@ import multer from "multer";
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { db, publicChannel, publicVideo, UPLOAD_DIR, WORK_DIR, type Video } from "./db";
-import { aiConfigured, generateIdeas, generateMetadata, generateScript, research, splitStoryIntoSeries } from "./ai";
-import { footageConfigured, voiceCharactersLeft, voiceConfigured } from "./media";
+import { aiConfigured, generateIdeas, generateMetadata, generateScript, research, splitStoryIntoSeries, suggestCast } from "./ai";
+import { createDesignedVoice, designVoice, footageConfigured, voiceCharactersLeft, voiceConfigured } from "./media";
 import { engineReady, geminiConfigured, listVoices, previewVoice, voiceFor, type VoiceEngine } from "./voices";
 import { ffmpegAvailable, isRendering, recoverInterruptedRenders, startRender } from "./render";
 import { cancelPipeline, inPipeline, recoverInterruptedPipelines, startPipeline } from "./pipeline";
@@ -397,6 +397,69 @@ app.post("/api/videos/:id/script", async (req, res) => {
   notAutomated(video);
   const script = await generateScript(getChannel(video.channelId), video);
   res.json(publicVideo(db.updateVideo(video.id, { script, status: video.status === "idea" ? "scripted" : video.status })!));
+});
+
+// ---------- Characters (dramatised scenes) ----------
+
+const castName = z
+  .string()
+  .trim()
+  .min(1)
+  .max(40)
+  .regex(/^[A-Za-z][A-Za-z .'’-]*$/, "Character names can use letters, spaces, dots, apostrophes and hyphens.");
+
+function requireVoice() {
+  if (!voiceConfigured()) throw new HttpError(400, "Character voices use ElevenLabs. Add your ElevenLabs key on the Setup page first.");
+}
+
+/** AI proposes the story's speaking characters with voice descriptions. Nothing is saved. */
+app.post("/api/videos/:id/cast/suggest", async (req, res) => {
+  requireAi();
+  const video = getVideo(req.params.id);
+  res.json({ characters: await suggestCast(getChannel(video.channelId), video) });
+});
+
+/** Designs voices from a description and returns previews to listen to. Nothing is saved. */
+app.post("/api/voices/design", async (req, res) => {
+  requireVoice();
+  const { description, text } = z
+    .object({ description: z.string().trim().min(20, "Describe the voice in at least 20 characters.").max(1000), text: z.string().max(1000).default("") })
+    .parse(req.body);
+  res.json({ previews: await designVoice(description, text) });
+});
+
+/**
+ * Saves the story's characters. Ones with a chosen preview (generatedVoiceId) are created as
+ * voices in the ElevenLabs account first; others use an existing voice ID.
+ */
+app.put("/api/videos/:id/cast", async (req, res) => {
+  const video = getVideo(req.params.id);
+  const { characters } = z
+    .object({
+      characters: z
+        .array(
+          z
+            .object({
+              name: castName,
+              role: z.string().trim().max(200).default(""),
+              description: z.string().trim().max(1000).default(""),
+              voiceId: z.string().trim().max(100).optional(),
+              generatedVoiceId: z.string().trim().max(200).optional(),
+            })
+            .refine((c) => c.voiceId || c.generatedVoiceId, "Choose a voice for every character."),
+        )
+        .max(10),
+    })
+    .parse(req.body);
+  if (characters.some((c) => c.generatedVoiceId)) requireVoice();
+  const cast = [];
+  for (const c of characters) {
+    const voiceId = c.generatedVoiceId
+      ? await createDesignedVoice(`${c.name} (${video.title.slice(0, 60)})`, c.description || c.role || c.name, c.generatedVoiceId)
+      : c.voiceId!;
+    cast.push({ name: c.name, role: c.role || undefined, description: c.description || undefined, voiceId });
+  }
+  res.json(publicVideo(db.updateVideo(video.id, { cast })!));
 });
 
 app.post("/api/videos/:id/research", async (req, res) => {

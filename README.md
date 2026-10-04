@@ -69,17 +69,17 @@ Create a key at [console.anthropic.com](https://console.anthropic.com) and set `
 
 - **Kokoro**: free and unlimited, runs on your computer (open-source model, English). No key needed. The first use downloads the model (about 90 MB) into `data/models`.
 - **Gemini**: very natural, and follows a narration style you describe. Create a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) and set `GEMINI_API_KEY`. The free tier allows only a few voice requests per day; turn on billing for regular use.
-- **ElevenLabs**: the most human voice, paid by monthly characters. Create a key at [elevenlabs.io](https://elevenlabs.io) (profile → API Keys, allow Text to Speech, Voices read and User read) and set `ELEVENLABS_API_KEY`.
+- **ElevenLabs**: the most human voice, paid by monthly characters. Create a key at [elevenlabs.io](https://elevenlabs.io) (profile → API Keys, allow Text to Speech, Voices read and write, User read, and Text to Voice if listed, which character voices need) and set `ELEVENLABS_API_KEY`.
 
 ElevenLabs returns exact word timings for captions. For Kokoro and Gemini the app estimates them from the text, which stays close because scenes are 1-2 sentences.
 
-### Character voices (optional, Edit channel → Character voices)
+### Character voices (optional, step 3 "Characters" on a video's page)
 
 Dramatised scenes where people from the story speak in their own voices, while the narrator (any engine) tells the rest. Needs the ElevenLabs key.
 
-1. Make a voice for each character in ElevenLabs (Voice Design from a text description, a library voice, or Instant Voice Clone of your own voice). It then appears in the app's voice list.
-2. Under **Edit channel → Character voices**, add each character's name and pick its voice.
-3. In a script, start a character's line with the name in capitals and a colon, with an optional delivery cue in brackets:
+1. Research the story, then open its page. The app suggests the speaking characters (name, who they are, a voice description and a sample line) and designs three ElevenLabs voices for each with Voice Design. It also offers this when you first click **Write script with AI**.
+2. Listen, pick a voice for each character (or one already in your ElevenLabs account), edit anything, and click **Save characters**. Only then are the chosen voices created in your ElevenLabs account.
+3. Write the script. The AI gives the characters short lines, each starting with the name in capitals and an optional delivery cue:
 
    ```
    In March 1431, the court read out Article 7.
@@ -87,7 +87,7 @@ Dramatised scenes where people from the story speak in their own voices, while t
    JOAN: [firm] I deny it entirely.
    ```
 
-   Lines without a label (or labelled `NARRATOR:`) are read by the narrator. When the channel has a cast, the AI writer adds 2-4 short scenes like this, keeps characters to about a quarter of the script and uses recorded words where they exist.
+   Lines without a label (or labelled `NARRATOR:`) are read by the narrator. Characters who appear in many videos, such as a host, can be added once under **Edit channel → Recurring character voices**.
 
 Character lines use ElevenLabs Eleven v3, which acts the cue (`[whispering]`, `[afraid]`); if the account can't use v3 the line is read without the cue. A label with no voice in the cast is read by the narrator, with a note. While a character speaks the video shows a small **DRAMATISATION** label, and on upload the video is marked as altered/synthetic content and the description ends with "Contains dramatised scenes with AI voices."
 
