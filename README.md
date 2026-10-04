@@ -73,6 +73,24 @@ Create a key at [console.anthropic.com](https://console.anthropic.com) and set `
 
 ElevenLabs returns exact word timings for captions. For Kokoro and Gemini the app estimates them from the text, which stays close because scenes are 1-2 sentences.
 
+### Character voices (optional, Edit channel → Character voices)
+
+Dramatised scenes where people from the story speak in their own voices, while the narrator (any engine) tells the rest. Needs the ElevenLabs key.
+
+1. Make a voice for each character in ElevenLabs (Voice Design from a text description, a library voice, or Instant Voice Clone of your own voice). It then appears in the app's voice list.
+2. Under **Edit channel → Character voices**, add each character's name and pick its voice.
+3. In a script, start a character's line with the name in capitals and a colon, with an optional delivery cue in brackets:
+
+   ```
+   In March 1431, the court read out Article 7.
+   PROSECUTOR: [cold] You carried a mandrake, hoping it would bring you riches.
+   JOAN: [firm] I deny it entirely.
+   ```
+
+   Lines without a label (or labelled `NARRATOR:`) are read by the narrator. When the channel has a cast, the AI writer adds 2-4 short scenes like this, keeps characters to about a quarter of the script and uses recorded words where they exist.
+
+Character lines use ElevenLabs Eleven v3, which acts the cue (`[whispering]`, `[afraid]`); if the account can't use v3 the line is read without the cue. A label with no voice in the cast is read by the narrator, with a note. While a character speaks the video shows a small **DRAMATISATION** label, and on upload the video is marked as altered/synthetic content and the description ends with "Contains dramatised scenes with AI voices."
+
 ### AI pictures (optional, Edit channel → Visuals)
 
 Instead of stock footage, the app can draw a picture for every shot with Gemini's image model, using the same Gemini key (billing required). Each picture shows what the narrator is saying at that moment, in the right era and place, and the video maker moves slowly across it. Roughly $0.04 per picture: about $0.70 for a Short and $4 for a 10-minute video. Pictures Gemini refuses use stock footage instead, with a note. Videos with AI pictures are marked as altered/synthetic content when uploaded.

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { isAudioTag } from "./speakers";
 
 // ---------- ElevenLabs (voiceover) ----------
 
@@ -92,15 +93,24 @@ export interface Word {
   end: number;
 }
 
-/** ElevenLabs narration with exact word timings (used for captions) and the spoken duration. */
-export async function elevenSpeak(text: string, voiceId: string, outFile: string) {
+/** Eleven v3 follows [audio tags] such as [whispering] for acted character lines. */
+export const ELEVEN_ACTING_MODEL = "eleven_v3";
+
+/**
+ * ElevenLabs narration with exact word timings (used for captions) and the spoken duration.
+ * `model` defaults to the narration model; Eleven v3 only accepts fixed stability steps.
+ */
+export async function elevenSpeak(text: string, voiceId: string, outFile: string, model = ELEVEN_MODEL) {
   const data = await eleven(`/v1/text-to-speech/${voiceId}/with-timestamps?output_format=mp3_44100_128`, {
     method: "POST",
     body: JSON.stringify({
       text,
-      model_id: ELEVEN_MODEL,
-      // Less "stability" and some "style" make narration more expressive and less monotone.
-      voice_settings: { stability: 0.38, similarity_boost: 0.8, style: 0.35, use_speaker_boost: true },
+      model_id: model,
+      voice_settings:
+        model === ELEVEN_ACTING_MODEL
+          ? { stability: 0.5, similarity_boost: 0.8, use_speaker_boost: true }
+          : // Less "stability" and some "style" make narration more expressive and less monotone.
+            { stability: 0.38, similarity_boost: 0.8, style: 0.35, use_speaker_boost: true },
     }),
   });
   fs.writeFileSync(outFile, Buffer.from(data.audio_base64, "base64"));
@@ -121,7 +131,8 @@ export async function elevenSpeak(text: string, voiceId: string, outFile: string
   });
   if (current) words.push(current);
   const duration = words.length ? words[words.length - 1].end : 0;
-  return { words, duration };
+  // Audio tags like [firm] steer the delivery but aren't spoken, so keep them out of captions.
+  return { words: words.filter((w) => !isAudioTag(w.text)), duration };
 }
 
 // ---------- Pexels (stock footage) ----------
