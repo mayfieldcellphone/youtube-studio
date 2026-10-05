@@ -109,6 +109,19 @@ export default function Setup() {
         <p className="mt-2 text-xs text-zinc-500">Then pick a narrator voice for each channel under Edit channel.</p>
       </Section>
 
+      <Section ok={status.hedra} title="2c. Talking characters (Hedra, optional)">
+        <p className="mb-2">
+          Makes a story's characters appear on screen and speak: their painted portrait is lip-synced to their ElevenLabs voice.
+          About $0.05 per second of character speech (roughly $2-3 for a 15-minute episode). Without it, characters show as
+          still portraits.
+        </p>
+        <ol className="list-decimal space-y-1.5 pl-5">
+          <li>Sign up at <Ext href="https://www.hedra.com">hedra.com</Ext> and add credits or a plan that includes API access.</li>
+          <li>Open your profile → <b>API</b> (or Settings → API Keys), create a key and copy it.</li>
+        </ol>
+        {field("HEDRA_API_KEY", "Hedra API key", "Paste your Hedra key")}
+      </Section>
+
       <Section ok={status.footage} title="3. Stock footage (Pexels, free)">
         <ol className="list-decimal space-y-1.5 pl-5">
           <li>Sign up free at <Ext href="https://www.pexels.com/api/">pexels.com/api</Ext>, click <b>Get Started</b>, and copy your API key.</li>

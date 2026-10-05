@@ -87,7 +87,9 @@ Dramatised scenes where people from the story speak in their own voices, while t
    JOAN: [firm] I deny it entirely.
    ```
 
-   Lines without a label (or labelled `NARRATOR:`) are read by the narrator. Characters who appear in many videos, such as a host, can be added once under **Edit channel → Recurring character voices**.
+   Lines without a label (or labelled `NARRATOR:`) are read by the narrator.
+
+4. **On screen:** each saved character gets a painted portrait (Gemini, from the "how they look" description). While a character speaks, the video shows their portrait lip-synced to their line by [Hedra](https://www.hedra.com) (set `HEDRA_API_KEY` on the Setup page, about $0.05 per second of character speech). Without a Hedra key the portrait is shown still, with a slow push-in. Use **New portrait** or **Change look** on the video page to redo one; the 9:16 version for Shorts is painted from the 16:9 one so the face matches. `HEDRA_MODEL` can force a specific Hedra model. Characters who appear in many videos, such as a host, can be added once under **Edit channel → Recurring character voices**.
 
 Character lines use ElevenLabs Eleven v3, which acts the cue (`[whispering]`, `[afraid]`); if the account can't use v3 the line is read without the cue. A label with no voice in the cast is read by the narrator, with a note. While a character speaks the video shows a small **DRAMATISATION** label, and on upload the video is marked as altered/synthetic content and the description ends with "Contains dramatised scenes with AI voices."
 

@@ -73,6 +73,10 @@ export interface CastMember {
   role?: string;
   /** How the voice sounds (also used to design it in ElevenLabs) */
   description?: string;
+  /** How they look: age, face, hair, clothing, era (used to paint their portrait) */
+  appearance?: string;
+  /** Painted portraits for 16:9 and 9:16 videos (server file paths) */
+  portraits?: { landscape?: string; portrait?: string };
 }
 
 export interface StoredFile {
@@ -242,6 +246,9 @@ function removeFiles(video: Video) {
   for (const file of [video.videoFile, video.thumbnailFile]) {
     if (file) fs.rm(file.path, { force: true }, () => {});
   }
+  for (const c of video.cast ?? []) {
+    for (const p of Object.values(c.portraits ?? {})) if (p) fs.rm(p, { force: true }, () => {});
+  }
 }
 
 /** Strips secrets (the YouTube refresh token) before sending a channel to the browser. */
@@ -249,6 +256,7 @@ export function publicChannel(channel: Channel) {
   const { youtube, musicFile, ...rest } = channel;
   return {
     ...rest,
+    cast: publicCast(rest.cast),
     musicFile: musicFile && { name: musicFile.name, size: musicFile.size, mimeType: musicFile.mimeType },
     youtube: youtube && {
       channelId: youtube.channelId,
@@ -259,8 +267,16 @@ export function publicChannel(channel: Channel) {
   };
 }
 
+/** A cast list for the browser: portrait paths become "has a portrait" flags. */
+export function publicCast(cast?: CastMember[]) {
+  return cast?.map(({ portraits, ...c }) => ({
+    ...c,
+    portraits: { landscape: Boolean(portraits?.landscape), portrait: Boolean(portraits?.portrait) },
+  }));
+}
+
 /** Hides server file paths from the browser. */
 export function publicVideo(video: Video) {
   const strip = (f?: StoredFile) => f && { name: f.name, size: f.size, mimeType: f.mimeType };
-  return { ...video, videoFile: strip(video.videoFile), thumbnailFile: strip(video.thumbnailFile) };
+  return { ...video, cast: publicCast(video.cast), videoFile: strip(video.videoFile), thumbnailFile: strip(video.thumbnailFile) };
 }

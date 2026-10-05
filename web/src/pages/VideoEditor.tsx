@@ -278,7 +278,15 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
 
       <div ref={charactersRef}>
         <Step n={3} title="Characters (optional)" done={Boolean(video.cast?.length)}>
-          <Characters video={video} ready={status.voice} aiReady={status.ai} suggestRequest={suggestRequest} onSaved={apply} />
+          <Characters
+            video={video}
+            ready={status.voice}
+            aiReady={status.ai}
+            picturesReady={status.gemini}
+            talking={status.hedra}
+            suggestRequest={suggestRequest}
+            onSaved={apply}
+          />
         </Step>
       </div>
 

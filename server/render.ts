@@ -8,6 +8,8 @@ import { planScenes } from "./ai";
 import { download, findFootage, voiceConfigured, type Footage, type Word } from "./media";
 import { synthesizeScenes, voiceFor, type CharacterLine } from "./voices";
 import { castVoice, NARRATOR } from "./speakers";
+import { hedraConfigured, talkingClip } from "./hedra";
+import { ensurePortrait } from "./portraits";
 import { CLIP_SECONDS, makeClips } from "./veo";
 import { DEFAULT_PICTURE_STYLES, makePictures } from "./images";
 
@@ -77,12 +79,15 @@ async function render(videoId: string) {
     //    Scenes spoken by a character use that character's ElevenLabs voice from the channel's cast.
     const notes: string[] = [];
     const unvoiced = new Set<string>();
-    const characters: (CharacterLine | undefined)[] = scenes.map((scene) => {
+    const members = scenes.map((scene) => {
       if (scene.speaker === NARRATOR) return undefined;
       const member = castVoice(channel, scene.speaker, video);
       if (!member) unvoiced.add(scene.speaker);
-      return member && { voiceId: member.voiceId, delivery: scene.delivery };
+      return member;
     });
+    const characters: (CharacterLine | undefined)[] = members.map(
+      (member, i) => member && { voiceId: member.voiceId, delivery: scenes[i].delivery },
+    );
     if (characters.some(Boolean) && !voiceConfigured()) {
       throw new Error("This script has character lines, which are voiced by ElevenLabs. Add your ElevenLabs key on the Setup page, or remove the speaker labels from the script.");
     }
@@ -99,11 +104,15 @@ async function render(videoId: string) {
     );
     const voices = narrated.map((v) => ({ ...v, duration: Math.max(v.duration, 0.5) + GAP }));
 
+    // 1b. Characters appear while they speak: their painted portrait, lip-synced to their line
+    //     by Hedra when it's set up, otherwise the portrait with a slow push-in.
+    const characterShots = await characterVisuals(video, members, narrated, portrait, work, notes, (name, p) => stage(name, 35 + 6 * p));
+
     // 2. Plan shots: each scene's time is split between its shots. Frame counts come from
     //    cumulative times so the picture never drifts from the narration. Scenes chosen for
     //    AI footage open with one Veo clip (up to 8 s); any remaining time uses stock shots.
     const aiScenes = pickAiScenes(channel.aiFootage ?? "off", scenes);
-    const shots: { query: string; fallback: string; frames: number; picture: string; aiPrompt?: string }[] = [];
+    const shots: { query: string; fallback: string; frames: number; picture: string; aiPrompt?: string; fixed?: Visual }[] = [];
     let elapsed = 0;
     const addShot = (seconds: number, shot: Omit<(typeof shots)[number], "frames">) => {
       const frames = Math.round((elapsed + seconds) * FPS) - Math.round(elapsed * FPS);
@@ -112,6 +121,11 @@ async function render(videoId: string) {
     };
     for (const [i, scene] of scenes.entries()) {
       const duration = voices[i].duration;
+      const speaker = characterShots.get(i);
+      if (speaker) {
+        addShot(duration, { query: scene.fallbackQuery, picture: "", fallback: scene.fallbackQuery, fixed: speaker });
+        continue;
+      }
       let planned = scene.shots;
       let remaining = duration;
       if (aiScenes.has(i)) {
@@ -152,7 +166,7 @@ async function render(videoId: string) {
     // 3b. AI pictures for the other shots, if the channel uses them; failures use stock footage.
     const pictureFiles = new Map<number, string>();
     if (channel.visuals === "pictures") {
-      const wanted = shots.flatMap((s, i) => (aiFiles.has(i) ? [] : [i]));
+      const wanted = shots.flatMap((s, i) => (aiFiles.has(i) || s.fixed ? [] : [i]));
       const label = (done: number) => `Drawing AI pictures (${done}/${wanted.length})`;
       stage(label(0), 41);
       const style = channel.pictureStyle?.trim() || DEFAULT_PICTURE_STYLES[channel.look ?? "clean"];
@@ -174,8 +188,12 @@ async function render(videoId: string) {
 
     // 3c. Stock footage for every other shot, never reusing a clip within the video.
     const used = new Set<string>();
-    const visuals: ((Footage & { file: string }) | null)[] = [];
+    const visuals: (Visual | null)[] = [];
     for (const [i, shot] of shots.entries()) {
+      if (shot.fixed) {
+        visuals.push(shot.fixed);
+        continue;
+      }
       const aiFile = aiFiles.get(i);
       if (aiFile) {
         visuals.push({ id: `ai-${i}`, kind: "video", url: "", file: aiFile });
@@ -235,7 +253,7 @@ async function render(videoId: string) {
     }
     fs.writeFileSync(
       path.join(work, "captions.ass"),
-      buildCaptions(voices.map((v, i) => ({ ...v, dramatised: Boolean(characters[i]) })), portrait, W, H),
+      buildCaptions(voices.map((v, i) => ({ ...v, speaker: characters[i] ? members[i]?.name : undefined })), portrait, W, H),
     );
 
     const music = channel.musicFile && fs.existsSync(channel.musicFile.path) ? channel.musicFile.path : null;
@@ -307,8 +325,11 @@ const LOOKS: Record<VideoLook, string> = {
   warm: "eq=contrast=1.06:saturation=1.1,colorbalance=rs=0.05:gs=0.01:bs=-0.05,vignette=PI/6",
 };
 
+/** What fills the screen for one shot. `hold` = a speaking character: no camera pan, last frame held. */
+type Visual = Footage & { file: string; hold?: boolean };
+
 function shotArgs(
-  visual: (Footage & { file: string }) | null,
+  visual: Visual | null,
   frames: number,
   index: number,
   W: number,
@@ -321,7 +342,13 @@ function shotArgs(
   const forward = index % 2 === 0;
   let input: string[];
   let video: string;
-  if (visual?.kind === "video") {
+  if (visual?.kind === "video" && visual.hold) {
+    // A talking clip: framed still, and its last frame held for the short pause after the line.
+    input = ["-i", visual.file];
+    video =
+      `[0:v]fps=${FPS},scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},` +
+      `tpad=stop_mode=clone:stop_duration=${(seconds + 1).toFixed(2)}`;
+  } else if (visual?.kind === "video") {
     // Slightly oversize, then pan slowly across: reads as a deliberate camera move.
     const [bw, bh] = [Math.round(W * 1.08), Math.round(H * 1.08)];
     const progress = forward ? `(t/${seconds.toFixed(3)})` : `(1-t/${seconds.toFixed(3)})`;
@@ -340,7 +367,8 @@ function shotArgs(
       { z: `1.18-0.18*${t}`, x: "iw/2-(iw/zoom/2)" },
       { z: "1.15", x: `(iw-iw/zoom)*(1-${t})` },
     ];
-    const move = moves[index % moves.length];
+    // A speaking character's portrait always pushes in slowly towards the face.
+    const move = visual.hold ? moves[0] : moves[index % moves.length];
     input = ["-loop", "1", "-i", visual.file];
     video =
       `[0:v]scale=${bw}:${bh}:force_original_aspect_ratio=increase,crop=${bw}:${bh},` +
@@ -368,7 +396,7 @@ const WHITE = "&H00FFFFFF&";
  * pop when a new line appears. Long videos: clean subtitle lines.
  */
 export function buildCaptions(
-  voices: { words: Word[]; duration: number; dramatised?: boolean }[],
+  voices: { words: Word[]; duration: number; speaker?: string }[],
   portrait: boolean,
   W: number,
   H: number,
@@ -387,14 +415,14 @@ export function buildCaptions(
   const lines: string[] = [];
   let offset = 0;
   // A small "DRAMATISATION" label in the top corner while a character speaks.
-  const label = (start: number, end: number) =>
-    `Dialogue: 1,${assTime(start)},${assTime(end)},Label,,0,0,0,,DRAMATISATION`;
+  const label = (start: number, end: number, speaker: string) =>
+    `Dialogue: 1,${assTime(start)},${assTime(end)},Label,,0,0,0,,${speaker.replace(/[{}\\]/g, "").toUpperCase()} · DRAMATISATION`;
   for (const [scene, voice] of voices.entries()) {
-    if (voice.dramatised && !voices[scene - 1]?.dramatised) {
-      // One label across consecutive character scenes.
+    if (voice.speaker && voices[scene - 1]?.speaker !== voice.speaker) {
+      // One label per run of lines by the same character.
       let end = offset;
-      for (let k = scene; k < voices.length && voices[k].dramatised; k++) end += voices[k].duration;
-      lines.push(label(offset, end));
+      for (let k = scene; k < voices.length && voices[k].speaker === voice.speaker; k++) end += voices[k].duration;
+      lines.push(label(offset, end, voice.speaker));
     }
     for (let i = 0; i < voice.words.length; i += perLine) {
       const chunk = voice.words.slice(i, i + perLine);
@@ -480,4 +508,57 @@ function ffmpeg(args: string[], onProgress?: (seconds: number) => void, cwd?: st
       reject(new Error(`Video editing failed:\n${lines.slice(-8).join("\n").slice(-800)}`));
     });
   });
+}
+
+/**
+ * The picture for each character scene: a Hedra talking clip of the character's portrait
+ * saying the line, or the portrait itself. Scenes left out (no portrait could be made, or the
+ * character comes from the channel's recurring cast) use normal footage. Problems become notes.
+ */
+async function characterVisuals(
+  video: { id: string },
+  members: ({ name: string } | undefined)[],
+  narrated: { file: string; duration: number }[],
+  portrait: boolean,
+  work: string,
+  notes: string[],
+  stage: (name: string, progress: number) => void,
+) {
+  const shots = new Map<number, Visual>();
+  const scenes = members.flatMap((m, i) => (m ? [i] : []));
+  if (!scenes.length) return shots;
+  const orientation = portrait ? "portrait" : "landscape";
+
+  stage("Painting character portraits", 0);
+  const portraits = new Map<string, string | null>();
+  for (const i of scenes) {
+    const name = members[i]!.name;
+    if (portraits.has(name)) continue;
+    try {
+      portraits.set(name, await ensurePortrait(video.id, name, orientation));
+    } catch (err) {
+      portraits.set(name, null);
+      notes.push(`${name} has no portrait, so their lines show normal footage. ${(err as Error).message}`);
+    }
+  }
+
+  const withPortrait = scenes.filter((i) => portraits.get(members[i]!.name));
+  let talkingFailed = !hedraConfigured();
+  for (const [k, i] of withPortrait.entries()) {
+    const image = portraits.get(members[i]!.name)!;
+    if (!talkingFailed) {
+      stage(`Animating characters (${k + 1}/${withPortrait.length}), about a minute each`, k / withPortrait.length);
+      try {
+        const file = await talkingClip(image, narrated[i].file, portrait, path.join(work, `talk-${i}.mp4`));
+        shots.set(i, { id: `talk-${i}`, kind: "video", url: "", file, hold: true });
+        continue;
+      } catch (err) {
+        // One failure usually means all would fail (key, credits): show portraits for the rest.
+        talkingFailed = true;
+        notes.push(`Characters are shown as still portraits instead of talking. ${(err as Error).message}`);
+      }
+    }
+    shots.set(i, { id: `portrait-${i}`, kind: "photo", url: "", file: image, hold: true });
+  }
+  return shots;
 }
