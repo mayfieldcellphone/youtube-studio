@@ -15,6 +15,9 @@ import { ffmpegAvailable, isRendering, recoverInterruptedRenders, startRender } 
 import { cancelPipeline, inPipeline, recoverInterruptedPipelines, startPipeline } from "./pipeline";
 import { authUrl, completeAuth, redirectUri, revokeAccess, syncChannel, uploadAndSchedule, youtubeConfigured } from "./youtube";
 import { privacyPage, termsPage } from "./legal";
+import { hedraConfigured } from "./hedra";
+import { ensurePortrait, portraitFile } from "./portraits";
+import { speakerKey } from "./speakers";
 import { appUrl, describeSettings, keyProblems, loadSettings, saveSettings, SETTING_KEYS, wrongBox, type SettingKey } from "./settings";
 
 loadSettings();
@@ -72,6 +75,7 @@ app.get("/api/status", (req, res) => {
     voice: voiceConfigured(),
     gemini: geminiConfigured(),
     footage: footageConfigured(),
+    hedra: hedraConfigured(),
     ffmpeg: ffmpegAvailable(),
     keyProblems: loggedIn(req) ? keyProblems() : [],
     redirectUri: redirectUri(),
@@ -443,6 +447,7 @@ app.put("/api/videos/:id/cast", async (req, res) => {
               name: castName,
               role: z.string().trim().max(200).default(""),
               description: z.string().trim().max(1000).default(""),
+              appearance: z.string().trim().max(1000).default(""),
               voiceId: z.string().trim().max(100).optional(),
               generatedVoiceId: z.string().trim().max(200).optional(),
             })
@@ -452,14 +457,41 @@ app.put("/api/videos/:id/cast", async (req, res) => {
     })
     .parse(req.body);
   if (characters.some((c) => c.generatedVoiceId)) requireVoice();
+  const before = video.cast ?? [];
   const cast = [];
   for (const c of characters) {
     const voiceId = c.generatedVoiceId
       ? await createDesignedVoice(`${c.name} (${video.title.slice(0, 60)})`, c.description || c.role || c.name, c.generatedVoiceId)
       : c.voiceId!;
-    cast.push({ name: c.name, role: c.role || undefined, description: c.description || undefined, voiceId });
+    // Keep a character's portraits unless their look was changed.
+    const previous = before.find((p) => speakerKey(p.name) === speakerKey(c.name));
+    const appearance = c.appearance || previous?.appearance;
+    const portraits = previous && (previous.appearance ?? "") === (appearance ?? "") ? previous.portraits : undefined;
+    cast.push({ name: c.name, role: c.role || undefined, description: c.description || undefined, appearance, voiceId, portraits });
   }
+  // Delete portraits of removed characters, or ones replaced because the look changed.
+  const kept = new Set(cast.flatMap((c) => Object.values(c.portraits ?? {})));
+  for (const p of before.flatMap((c) => Object.values(c.portraits ?? {}))) if (p && !kept.has(p)) fs.rm(p, { force: true }, () => {});
   res.json(publicVideo(db.updateVideo(video.id, { cast })!));
+});
+
+const orientationParam = z.enum(["landscape", "portrait"]);
+
+/** Paints (or with regenerate, repaints) a character's portrait for this video's frame shape. */
+app.post("/api/videos/:id/cast/portrait", async (req, res) => {
+  const video = getVideo(req.params.id);
+  const { name, regenerate } = z.object({ name: castName, regenerate: z.boolean().default(false) }).parse(req.body);
+  await ensurePortrait(video.id, name, video.format === "short" ? "portrait" : "landscape", regenerate);
+  res.json(publicVideo(db.video(video.id)!));
+});
+
+app.get("/api/videos/:id/cast/portrait", (req, res) => {
+  const video = getVideo(req.params.id);
+  const name = castName.parse(req.query.name);
+  const orientation = orientationParam.catch(video.format === "short" ? "portrait" : "landscape").parse(req.query.o);
+  const file = portraitFile(video.id, name, orientation) ?? portraitFile(video.id, name, orientation === "portrait" ? "landscape" : "portrait");
+  if (!file) throw new HttpError(404, "No portrait yet.");
+  res.sendFile(file);
 });
 
 app.post("/api/videos/:id/research", async (req, res) => {

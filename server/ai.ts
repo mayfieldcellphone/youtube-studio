@@ -397,6 +397,7 @@ export interface SuggestedCharacter {
   name: string;
   role: string;
   voiceDescription: string;
+  appearance: string;
   sampleLine: string;
 }
 
@@ -419,6 +420,7 @@ For each give:
 - "name": the speaker label for the script, 1-2 words in capitals (JOAN, PROSECUTOR, FLAMEL).
 - "role": who they are in this story, under 12 words ("Joan of Arc, 19, on trial for heresy in 1431").
 - "voiceDescription": a description for an AI voice designer, 120-300 characters: gender, age, accent fitting their country and era (spoken in English), pitch, pace, tone and personality, recording quality ("clear, close studio recording"). Describe a voice type only; never ask it to imitate any real person or actor.
+- "appearance": how they look, for a painted portrait, 120-300 characters: sex, approximate age, face, hair, build, and clothing accurate to their country, era and rank. Don't use their name; describe them so a painter who has never heard of them could paint them ("a stern French cleric in his fifties, clean-shaven, grey tonsure, black and white Dominican habit, 1430s").
 - "sampleLine": a line they could plausibly say in the video, in English, 110-220 characters, in their voice and era. Use recorded words from the research when there are any; otherwise invent nothing factual.`,
     obj({
       characters: {
@@ -427,6 +429,7 @@ For each give:
           name: str("Speaker label in capitals"),
           role: str("Who they are in the story"),
           voiceDescription: str("Voice design description, 120-300 characters"),
+          appearance: str("How they look for a painted portrait, 120-300 characters, without their name"),
           sampleLine: str("A line to preview the voice, 110-220 characters"),
         }),
       },
@@ -437,6 +440,7 @@ For each give:
       name: speakerKey(c.name).replace(/[^A-Z .'-]/g, "").trim().slice(0, 40),
       role: c.role.trim().slice(0, 200),
       voiceDescription: c.voiceDescription.trim().slice(0, 1000),
+      appearance: (c.appearance ?? "").trim().slice(0, 1000),
       sampleLine: c.sampleLine.trim().slice(0, 900),
     }))
     .filter((c) => c.name && c.name !== NARRATOR && c.voiceDescription.length >= 20)

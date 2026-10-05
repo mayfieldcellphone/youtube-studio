@@ -35,6 +35,9 @@ export interface CastMember {
   voiceId: string;
   role?: string;
   description?: string;
+  appearance?: string;
+  /** Which painted portraits exist (16:9 and 9:16) */
+  portraits?: { landscape: boolean; portrait: boolean };
 }
 
 /** A character the AI proposes for a story, before any voice is made. */
@@ -42,6 +45,7 @@ export interface SuggestedCharacter {
   name: string;
   role: string;
   voiceDescription: string;
+  appearance: string;
   sampleLine: string;
 }
 
@@ -102,6 +106,7 @@ export type SettingKey =
   | "ELEVENLABS_API_KEY"
   | "GEMINI_API_KEY"
   | "PEXELS_API_KEY"
+  | "HEDRA_API_KEY"
   | "GOOGLE_CLIENT_ID"
   | "GOOGLE_CLIENT_SECRET"
   | "APP_URL"
@@ -120,6 +125,7 @@ export interface Status {
   gemini: boolean;
   keyProblems: string[];
   footage: boolean;
+  hedra: boolean;
   ffmpeg: boolean;
   redirectUri: string;
 }
@@ -199,8 +205,12 @@ export const api = {
     request<{ previews: DesignedVoice[] }>("POST", "/api/voices/design", { description, text }),
   saveCast: (
     id: string,
-    characters: { name: string; role?: string; description?: string; voiceId?: string; generatedVoiceId?: string }[],
+    characters: { name: string; role?: string; description?: string; appearance?: string; voiceId?: string; generatedVoiceId?: string }[],
   ) => request<Video>("PUT", `/api/videos/${id}/cast`, { characters }),
+  paintPortrait: (id: string, name: string, regenerate = false) =>
+    request<Video>("POST", `/api/videos/${id}/cast/portrait`, { name, regenerate }),
+  portraitUrl: (v: Video, name: string) =>
+    `/api/videos/${v.id}/cast/portrait?name=${encodeURIComponent(name)}&t=${encodeURIComponent(v.updatedAt)}`,
   generateMetadata: (id: string) => request<Video>("POST", `/api/videos/${id}/metadata`),
   uploadFile: (id: string, kind: "video" | "thumbnail", file: File) => {
     const form = new FormData();

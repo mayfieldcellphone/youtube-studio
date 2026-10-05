@@ -44,10 +44,20 @@ const rank = (name: string) =>
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Draws one picture. Returns the saved file, or the reason it failed. */
-async function makePicture(model: string, prompt: string, portrait: boolean, outBase: string): Promise<{ file: string } | string> {
+async function makePicture(
+  model: string,
+  prompt: string,
+  portrait: boolean,
+  outBase: string,
+  reference?: string,
+): Promise<{ file: string } | string> {
+  // A reference picture keeps the same face and costume when a portrait is redrawn for another frame shape.
+  const refPart = reference && fs.existsSync(reference)
+    ? [{ inlineData: { mimeType: /\.jpe?g$/i.test(reference) ? "image/jpeg" : "image/png", data: fs.readFileSync(reference).toString("base64") } }]
+    : [];
   const body = (withAspect: boolean) =>
     JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
+      contents: [{ parts: [...refPart, { text: prompt }] }],
       generationConfig: {
         responseModalities: ["IMAGE"],
         ...(withAspect && { imageConfig: { aspectRatio: portrait ? "9:16" : "16:9" } }),
@@ -109,4 +119,35 @@ export async function makePictures(
   };
   await Promise.all([worker(), worker(), worker()]);
   return results;
+}
+
+/** How character portraits look: painted, so they read as a reconstruction rather than a photo. */
+export const PORTRAIT_STYLE =
+  "Classical oil painting in the style of an old master portrait, rich brushwork, dramatic chiaroscuro lighting against a dark plain background, historically accurate clothing for the period";
+
+/**
+ * Paints a character's portrait for talking scenes: head and shoulders, facing the viewer,
+ * mouth closed, face well lit, so lip-sync can animate it. With a reference picture, the same
+ * person is redrawn for the other frame shape.
+ */
+export async function makePortrait(appearance: string, portrait: boolean, outBase: string, reference?: string) {
+  const list = await imageModels();
+  if (!list.length) throw new Error("This Gemini key has no access to Gemini image models. Check that billing is on for it in Google AI Studio.");
+  const framing = portrait
+    ? "Vertical frame: head and shoulders filling the upper two thirds, centred."
+    : "Wide frame: head and shoulders on the centre of the frame with dark background either side.";
+  const prompt = [
+    reference
+      ? "Repaint the same person as in the reference picture: the same face, age, hair, clothing and painting style."
+      : "",
+    `A painted portrait of ${appearance.trim()}.`,
+    "Facing the viewer, looking just past the camera, mouth gently closed, neutral expression, the whole face clearly visible and evenly lit, no hands near the face, nothing covering the mouth.",
+    framing,
+    `Style: ${PORTRAIT_STYLE}. ${ALWAYS}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const result = await makePicture(list[0], prompt, portrait, outBase, reference);
+  if (typeof result === "string") throw new Error(`Couldn't paint the portrait: ${result}`);
+  return result.file;
 }
