@@ -55,6 +55,7 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
   const [voices, setVoices] = useState<Voice[]>([]);
   // Character voices always come from ElevenLabs, whatever engine the narrator uses.
   const [castVoices, setCastVoices] = useState<Voice[]>([]);
+  const [castVoicesError, setCastVoicesError] = useState<string | null>(null);
   const existing = channels.find((c) => c.id === channelId);
   const [form, setForm] = useState<Omit<Channel, "id" | "createdAt" | "youtube" | "stats">>(
     existing ? { ...EMPTY, ...existing } : EMPTY,
@@ -83,7 +84,13 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
 
   useEffect(() => {
     if (!status.voice) return;
-    api.voices("elevenlabs").then(setCastVoices).catch(() => {});
+    api
+      .voices("elevenlabs")
+      .then((list) => {
+        setCastVoices(list);
+        setCastVoicesError(list.length ? null : "Your ElevenLabs account returned no voices.");
+      })
+      .catch((e: Error) => setCastVoicesError(e.message));
   }, [status.voice]);
 
   if (channelId && !existing) return <p className="muted">Channel not found.</p>;
@@ -230,6 +237,7 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
         <CastEditor
           cast={form.cast ?? []}
           voices={castVoices}
+          voicesError={castVoicesError}
           ready={status.voice}
           onChange={(cast) => set("cast", cast)}
         />
@@ -503,20 +511,24 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 function CastEditor({
   cast,
   voices,
+  voicesError,
   ready,
   onChange,
 }: {
   cast: { name: string; voiceId: string }[];
   voices: Voice[];
+  voicesError: string | null;
   ready: boolean;
   onChange: (cast: { name: string; voiceId: string }[]) => void;
 }) {
   const update = (i: number, patch: Partial<{ name: string; voiceId: string }>) =>
     onChange(cast.map((c, k) => (k === i ? { ...c, ...patch } : c)));
+  const preview = useAction();
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   return (
     <Field
-      label="Character voices (optional)"
-      hint="For dramatised scenes where people from the story speak. In a script, start a line with the name in capitals, e.g. JOAN: [firm] I deny it entirely. The AI writer uses these characters too. Voiced by ElevenLabs; videos with characters are labelled as dramatisations and disclosed to YouTube as AI content."
+      label="Recurring character voices (optional)"
+      hint="For characters who appear in many videos, such as a host. Characters for one story are easier to set up on the video's page (step 3, Characters), where the AI suggests them and designs their voices. In a script, start a line with the name in capitals, e.g. JOAN: [firm] I deny it entirely."
     >
       {!ready ? (
         <p className="text-xs text-amber-700 dark:text-amber-400">
@@ -545,6 +557,16 @@ function CastEditor({
                   </option>
                 ))}
               </select>
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={!member.voiceId || !!preview.busy}
+                onClick={() =>
+                  preview.run(`p${i}`, async () => setPreviewUrl(await api.previewVoice({ engine: "elevenlabs", voiceId: member.voiceId })))
+                }
+              >
+                {preview.busy === `p${i}` && <Spinner />} Preview
+              </button>
               <button type="button" className="btn-secondary" aria-label={`Remove ${member.name || "character"}`} onClick={() => onChange(cast.filter((_, k) => k !== i))}>
                 <X className="h-4 w-4" />
               </button>
@@ -558,6 +580,13 @@ function CastEditor({
           >
             <Plus className="h-4 w-4" /> Add character
           </button>
+          {previewUrl && <audio className="w-full" src={previewUrl} controls autoPlay />}
+          <ErrorBox error={preview.error} />
+          {voicesError && (
+            <p className="text-xs text-amber-700 dark:text-amber-400">
+              Couldn't load your ElevenLabs voices: {voicesError} Check that your API key allows Voices (read) on the Setup page.
+            </p>
+          )}
           <p className="text-xs text-zinc-500">
             New voices you make in ElevenLabs (Voice Design or Instant Voice Clone) appear in this list after you reload the page.
           </p>

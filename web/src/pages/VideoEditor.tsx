@@ -15,6 +15,7 @@ import {
 } from "../api";
 import { navigate, useApp } from "../App";
 import { ErrorBox, FormatBadge, Spinner, useAction } from "../components/ui";
+import { Characters, remember, remembered } from "../components/Characters";
 
 type Draft = Pick<Video, "title" | "hook" | "angle" | "keyword" | "script" | "description"> & { tags: string };
 
@@ -36,6 +37,8 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
   const [when, setWhen] = useState("");
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [publishing, setPublishing] = useState(false);
+  const [suggestRequest, setSuggestRequest] = useState(0);
+  const charactersRef = useRef<HTMLDivElement>(null);
   const { busy, error, setError, run } = useAction();
 
   const apply = useCallback((v: Video) => {
@@ -273,8 +276,14 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
         )}
       </Step>
 
+      <div ref={charactersRef}>
+        <Step n={3} title="Characters (optional)" done={Boolean(video.cast?.length)}>
+          <Characters video={video} ready={status.voice} aiReady={status.ai} suggestRequest={suggestRequest} onSaved={apply} />
+        </Step>
+      </div>
+
       <Step
-        n={3}
+        n={4}
         title="Script"
         done={Boolean(video.script.trim())}
         action={
@@ -283,6 +292,15 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
               className="btn-secondary"
               disabled={!!busy}
               onClick={() => {
+                // Offer characters once per story before the first script, so their lines get written in.
+                if (!video.script && status.voice && !video.cast?.length && !remembered(video.id)) {
+                  remember(video.id);
+                  if (confirm("Should people from this story speak in their own voices?\n\nOK: suggest characters and voices first (you review them before anything is created).\nCancel: write the script with the narrator only.")) {
+                    setSuggestRequest((n) => n + 1);
+                    charactersRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    return;
+                  }
+                }
                 if (!video.script || confirm("Replace the current script with a new one?")) ai("script", () => api.generateScript(video.id));
               }}
             >
@@ -304,10 +322,14 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
           {words} spoken words ≈ {Math.round(words / 2.5)} seconds
           {video.format === "short" && words / 2.5 > 60 && <span className="text-red-600"> (too long for a Short)</span>}
         </p>
-        <CastHint script={draft.script} cast={channel?.cast ?? []} channelId={channel?.id} />
+        <CastHint
+          script={draft.script}
+          cast={[...(video.cast ?? []), ...(channel?.cast ?? [])]}
+          onAdd={() => charactersRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+        />
       </Step>
 
-      <Step n={4} title="Make the video" done={Boolean(video.videoFile) && !renderRunning}>
+      <Step n={5} title="Make the video" done={Boolean(video.videoFile) && !renderRunning}>
         {!onYouTube && (
           <div className="mb-5 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -437,7 +459,7 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
       </Step>
 
       <Step
-        n={5}
+        n={6}
         title="Title, description and tags"
         done={Boolean(video.title.trim() && video.description.trim())}
         action={
@@ -480,7 +502,7 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
         </div>
       </Step>
 
-      <Step n={6} title="Schedule on YouTube" done={onYouTube}>
+      <Step n={7} title="Schedule on YouTube" done={onYouTube}>
         {onYouTube ? (
           <div className="space-y-3">
             {video.error && (
@@ -682,7 +704,7 @@ function ManualUpload({ video }: { video: Video }) {
  * Shows how to write character lines when the channel has a cast, and warns about speaker
  * labels in the script that have no voice yet (the narrator would read them).
  */
-function CastHint({ script, cast, channelId }: { script: string; cast: { name: string; voiceId: string }[]; channelId?: string }) {
+function CastHint({ script, cast, onAdd }: { script: string; cast: { name: string; voiceId: string }[]; onAdd: () => void }) {
   const key = (name: string) => name.trim().toUpperCase().replace(/\s+/g, " ");
   const voiced = new Set(cast.filter((c) => c.voiceId).map((c) => key(c.name)));
   const labels = new Set(
@@ -705,11 +727,10 @@ function CastHint({ script, cast, channelId }: { script: string; cast: { name: s
       )}
       {missing.length > 0 && (
         <p className="text-amber-700 dark:text-amber-400">
-          No voice for {missing.join(", ")}: the narrator will read {missing.length > 1 ? "those lines" : "that line"}. Add{" "}
-          {missing.length > 1 ? "them" : "it"} to the cast under{" "}
-          <a className="underline" href={`#/channels/${channelId ?? ""}/edit`}>
-            Edit channel
-          </a>
+          No voice for {missing.join(", ")}: the narrator will read {missing.length > 1 ? "those lines" : "that line"}.{" "}
+          <button type="button" className="underline" onClick={onAdd}>
+            Add {missing.length > 1 ? "them" : "it"} under Characters
+          </button>
           .
         </p>
       )}

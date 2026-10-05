@@ -79,7 +79,7 @@ async function render(videoId: string) {
     const unvoiced = new Set<string>();
     const characters: (CharacterLine | undefined)[] = scenes.map((scene) => {
       if (scene.speaker === NARRATOR) return undefined;
-      const member = castVoice(channel, scene.speaker);
+      const member = castVoice(channel, scene.speaker, video);
       if (!member) unvoiced.add(scene.speaker);
       return member && { voiceId: member.voiceId, delivery: scene.delivery };
     });
@@ -87,7 +87,7 @@ async function render(videoId: string) {
       throw new Error("This script has character lines, which are voiced by ElevenLabs. Add your ElevenLabs key on the Setup page, or remove the speaker labels from the script.");
     }
     for (const name of unvoiced) {
-      notes.push(`No voice is set for ${name}, so the narrator read those lines. Add ${name} to the cast under Edit channel.`);
+      notes.push(`No voice is set for ${name}, so the narrator read those lines. Add ${name} under Characters on this video's page.`);
     }
     const voice = voiceFor(channel);
     const narrated = await synthesizeScenes(

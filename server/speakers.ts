@@ -1,4 +1,4 @@
-import type { CastMember, Channel } from "./db";
+import type { CastMember, Channel, Video } from "./db";
 
 /**
  * Character dialogue in scripts. A line that starts with an uppercase speaker label is spoken
@@ -55,11 +55,25 @@ export function scriptSpeakers(script: string) {
   return [...found];
 }
 
-/** The cast member for a speaker label, if the channel has one with a voice. */
-export function castVoice(channel: Channel, speaker: string): CastMember | undefined {
+/**
+ * Everyone who can speak in a video: the story's own characters first, then the channel's
+ * recurring cast (a story character with the same name wins).
+ */
+export function allCast(channel: Channel, video?: Pick<Video, "cast">): CastMember[] {
+  const seen = new Set<string>();
+  return [...(video?.cast ?? []), ...(channel.cast ?? [])].filter((c) => {
+    const key = speakerKey(c.name);
+    if (!c.voiceId || !key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** The cast member for a speaker label, if the video or channel has one with a voice. */
+export function castVoice(channel: Channel, speaker: string, video?: Pick<Video, "cast">): CastMember | undefined {
   const key = speakerKey(speaker || NARRATOR);
   if (key === NARRATOR) return undefined;
-  return channel.cast?.find((c) => c.voiceId && speakerKey(c.name) === key);
+  return allCast(channel, video).find((c) => speakerKey(c.name) === key);
 }
 
 /** Removes [audio tags] that ElevenLabs v3 reads as directions, so they don't appear in captions. */

@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Channel, Research, Video } from "./db";
 import { google } from "./veo";
-import { NARRATOR, parseLine, scriptSpeakers, speakerKey } from "./speakers";
+import { allCast, NARRATOR, parseLine, scriptSpeakers, speakerKey } from "./speakers";
 
 /** Current Claude model. If it declines a request, the API retries on Anthropic's recommended fallback model. */
 const CLAUDE_MODEL = "claude-opus-5-5";
@@ -341,12 +341,14 @@ VOICE AND STYLE (this is narration for a voiceover, so write for the ear):
  * When the channel has a cast of character voices, scripts may include short dramatised
  * scenes in which those characters speak (see speakers.ts for the format).
  */
-function castCraft(channel: Channel) {
-  const names = (channel.cast ?? []).filter((c) => c.voiceId).map((c) => speakerKey(c.name));
+function castCraft(channel: Channel, video: Video) {
+  const cast = allCast(channel, video);
+  const names = cast.map((c) => speakerKey(c.name));
   if (!names.length) return "";
+  const who = cast.map((c) => `${speakerKey(c.name)}${c.role ? ` (${c.role})` : ""}`).join(", ");
   return `
 
-CHARACTER VOICES (this channel has actors for these speakers: ${names.join(", ")}):
+CHARACTER VOICES (this video has actors for these speakers: ${who}):
 - You may add 2-4 short dramatised scenes where real people from the story speak in their own voice. Keep character lines to about 20-30% of the spoken words; the narrator carries the story.
 - Write each spoken character line on its own line, starting with the speaker label in capitals and a colon, and optionally one delivery cue in square brackets: "JOAN: [firm] I deny it entirely."
 - Only use speaker labels from this list: ${names.join(", ")}, plus NARRATOR. Lines with no label are read by the narrator.
@@ -366,7 +368,7 @@ ${videoBrief(video)}
 ${research}
 Write the full narration script for this video, ready to be read aloud by a voiceover.
 
-${scriptCraft(video)}${castCraft(channel)}`,
+${scriptCraft(video)}${castCraft(channel, video)}`,
     obj({ script: str("The complete script") }),
   );
 
@@ -385,10 +387,60 @@ Judge it as a viewer scrolling at midnight: would they stop at line 1, and still
 Then rewrite the whole script to fix them. Keep every fact accurate, keep it the right length, and make every line earn its place.
 
 The standard it must meet:
-${scriptCraft(video)}${castCraft(channel)}`,
+${scriptCraft(video)}${castCraft(channel, video)}`,
     obj({ problems: str("Short list of what was wrong"), script: str("The improved complete script") }),
   );
   return edited.script;
+}
+
+export interface SuggestedCharacter {
+  name: string;
+  role: string;
+  voiceDescription: string;
+  sampleLine: string;
+}
+
+/**
+ * Proposes the people who should speak in a story's dramatised scenes, each with a voice
+ * description for ElevenLabs Voice Design and a line to hear the voice with. Nothing is
+ * created: the user reviews and approves first.
+ */
+export async function suggestCast(channel: Channel, video: Video) {
+  const research = video.research ? `\nResearch notes:\n${video.research.notes}\n` : "";
+  const script = video.script.trim() ? `\nCurrent script:\n${video.script}\n` : "";
+  const result = await generate<{ characters: SuggestedCharacter[] }>(
+    `${channelBrief(channel)}
+
+${videoBrief(video)}
+${research}${script}
+This video will include 2-4 short dramatised scenes where real people from the story speak in their own voices, between the narrator's lines.
+Choose the ${video.format === "short" ? "1-2" : "2-4"} people whose spoken lines would make the strongest scenes: the central figure, an opponent, a witness or official. Only real people documented in this story (or an anonymous role such as "a guard" or "the prosecutor" when the records don't name them). No narrator.
+For each give:
+- "name": the speaker label for the script, 1-2 words in capitals (JOAN, PROSECUTOR, FLAMEL).
+- "role": who they are in this story, under 12 words ("Joan of Arc, 19, on trial for heresy in 1431").
+- "voiceDescription": a description for an AI voice designer, 120-300 characters: gender, age, accent fitting their country and era (spoken in English), pitch, pace, tone and personality, recording quality ("clear, close studio recording"). Describe a voice type only; never ask it to imitate any real person or actor.
+- "sampleLine": a line they could plausibly say in the video, in English, 110-220 characters, in their voice and era. Use recorded words from the research when there are any; otherwise invent nothing factual.`,
+    obj({
+      characters: {
+        type: "array",
+        items: obj({
+          name: str("Speaker label in capitals"),
+          role: str("Who they are in the story"),
+          voiceDescription: str("Voice design description, 120-300 characters"),
+          sampleLine: str("A line to preview the voice, 110-220 characters"),
+        }),
+      },
+    }),
+  );
+  return result.characters
+    .map((c) => ({
+      name: speakerKey(c.name).replace(/[^A-Z .'-]/g, "").trim().slice(0, 40),
+      role: c.role.trim().slice(0, 200),
+      voiceDescription: c.voiceDescription.trim().slice(0, 1000),
+      sampleLine: c.sampleLine.trim().slice(0, 900),
+    }))
+    .filter((c) => c.name && c.name !== NARRATOR && c.voiceDescription.length >= 20)
+    .slice(0, 4);
 }
 
 export interface Metadata {

@@ -69,6 +69,10 @@ export interface CastMember {
   name: string;
   /** ElevenLabs voice ID (a library, Voice Design or cloned voice) */
   voiceId: string;
+  /** Who they are in the story, e.g. "Joan of Arc, on trial in 1431" */
+  role?: string;
+  /** How the voice sounds (also used to design it in ElevenLabs) */
+  description?: string;
 }
 
 export interface StoredFile {
@@ -121,6 +125,8 @@ export interface Video {
   render?: RenderJob;
   /** The last made video contains AI-generated footage (disclosed to YouTube on upload). */
   aiFootageUsed?: boolean;
+  /** Characters for this story, each with an ElevenLabs voice; used before the channel's cast. */
+  cast?: CastMember[];
   /** The last made video has dramatised scenes voiced by AI characters (disclosed on upload). */
   characterVoicesUsed?: boolean;
   pipeline?: PipelineJob;

@@ -33,6 +33,23 @@ export interface Channel {
 export interface CastMember {
   name: string;
   voiceId: string;
+  role?: string;
+  description?: string;
+}
+
+/** A character the AI proposes for a story, before any voice is made. */
+export interface SuggestedCharacter {
+  name: string;
+  role: string;
+  voiceDescription: string;
+  sampleLine: string;
+}
+
+/** A Voice Design preview: listen, then keep it by its generatedVoiceId. */
+export interface DesignedVoice {
+  generatedVoiceId: string;
+  /** data: URL */
+  audio: string;
 }
 
 export interface FileInfo {
@@ -55,6 +72,8 @@ export interface Video {
   render?: { stage: string; progress: number; error?: string; notes?: string[]; startedAt: string; finishedAt?: string };
   aiFootageUsed?: boolean;
   characterVoicesUsed?: boolean;
+  /** This story's speaking characters */
+  cast?: CastMember[];
   pipeline?: { stopAfter: StopAfter; step: string; result?: string; error?: string; startedAt: string; finishedAt?: string };
   titleOptions: string[];
   description: string;
@@ -175,6 +194,13 @@ export const api = {
   voiceUsage: () => request<{ used: number; limit: number; resetsAt?: string } | null>("GET", "/api/voice/usage"),
   videoUrl: (v: Video) => `/api/videos/${v.id}/video?t=${encodeURIComponent(v.updatedAt)}`,
   generateScript: (id: string) => request<Video>("POST", `/api/videos/${id}/script`),
+  suggestCast: (id: string) => request<{ characters: SuggestedCharacter[] }>("POST", `/api/videos/${id}/cast/suggest`),
+  designVoice: (description: string, text: string) =>
+    request<{ previews: DesignedVoice[] }>("POST", "/api/voices/design", { description, text }),
+  saveCast: (
+    id: string,
+    characters: { name: string; role?: string; description?: string; voiceId?: string; generatedVoiceId?: string }[],
+  ) => request<Video>("PUT", `/api/videos/${id}/cast`, { characters }),
   generateMetadata: (id: string) => request<Video>("POST", `/api/videos/${id}/metadata`),
   uploadFile: (id: string, kind: "video" | "thumbnail", file: File) => {
     const form = new FormData();
