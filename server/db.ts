@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import type { CharacterFx } from "./characterFx";
 import type { PresetId, VoicePreset } from "./voicePresets";
 
 export const DATA_DIR = path.resolve(process.env.DATA_DIR ?? "data");
@@ -78,6 +79,14 @@ export interface CastMember {
   appearance?: string;
   /** Painted portraits for 16:9 and 9:16 videos (server file paths) */
   portraits?: { landscape?: string; portrait?: string };
+  /** Age, accent and tone of the voice, e.g. "60s", "Hungarian-American", "tired, wry" */
+  age?: string;
+  accent?: string;
+  tone?: string;
+  /** This character's default ElevenLabs voice settings (each 0-1; speed 0.7-1.2) */
+  settings?: { stability?: number; style?: number; speed?: number };
+  /** Sound treatment for their lines (room, radio, intimate) */
+  fx?: CharacterFx;
 }
 
 export interface StoredFile {

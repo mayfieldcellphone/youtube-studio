@@ -18,6 +18,8 @@ import { privacyPage, termsPage } from "./legal";
 import { hedraConfigured } from "./hedra";
 import { ensurePortrait, portraitFile } from "./portraits";
 import { speakerKey } from "./speakers";
+import { prepareScript } from "./screenplay";
+import { CHARACTER_FX } from "./characterFx";
 import { DEFAULT_PRESETS, PRESET_IDS, resolvePresets } from "./voicePresets";
 import { appUrl, describeSettings, keyProblems, loadSettings, saveSettings, SETTING_KEYS, wrongBox, type SettingKey } from "./settings";
 
@@ -200,6 +202,21 @@ app.put("/api/settings", (req, res) => {
 
 // ---------- Channels ----------
 
+/** Voice details for a cast member, shared by the channel's cast and a video's cast. */
+const castVoiceDetails = {
+  age: z.string().trim().max(40).optional(),
+  accent: z.string().trim().max(60).optional(),
+  tone: z.string().trim().max(100).optional(),
+  settings: z
+    .object({
+      stability: z.number().min(0).max(1).optional(),
+      style: z.number().min(0).max(1).optional(),
+      speed: z.number().min(0.7).max(1.2).optional(),
+    })
+    .optional(),
+  fx: z.enum(CHARACTER_FX).optional(),
+};
+
 const channelInput = z.object({
   name: z.string().trim().min(1).max(100),
   niche: z.string().trim().min(1).max(500),
@@ -224,6 +241,7 @@ const channelInput = z.object({
         // Becomes the script label, e.g. "Joan" for lines starting "JOAN:".
         name: z.string().trim().min(1).max(40).regex(/^[A-Za-z][A-Za-z .'’-]*$/, "Character names can use letters, spaces, dots, apostrophes and hyphens."),
         voiceId: z.string().trim().min(1).max(100),
+        ...castVoiceDetails,
       }),
     )
     .max(20)
@@ -451,6 +469,7 @@ app.put("/api/videos/:id/cast", async (req, res) => {
               appearance: z.string().trim().max(1000).default(""),
               voiceId: z.string().trim().max(100).optional(),
               generatedVoiceId: z.string().trim().max(200).optional(),
+              ...castVoiceDetails,
             })
             .refine((c) => c.voiceId || c.generatedVoiceId, "Choose a voice for every character."),
         )
@@ -468,7 +487,19 @@ app.put("/api/videos/:id/cast", async (req, res) => {
     const previous = before.find((p) => speakerKey(p.name) === speakerKey(c.name));
     const appearance = c.appearance || previous?.appearance;
     const portraits = previous && (previous.appearance ?? "") === (appearance ?? "") ? previous.portraits : undefined;
-    cast.push({ name: c.name, role: c.role || undefined, description: c.description || undefined, appearance, voiceId, portraits });
+    cast.push({
+      name: c.name,
+      role: c.role || undefined,
+      description: c.description || undefined,
+      appearance,
+      voiceId,
+      portraits,
+      age: c.age || undefined,
+      accent: c.accent || undefined,
+      tone: c.tone || undefined,
+      settings: c.settings,
+      fx: c.fx,
+    });
   }
   // Delete portraits of removed characters, or ones replaced because the look changed.
   const kept = new Set(cast.flatMap((c) => Object.values(c.portraits ?? {})));
@@ -602,7 +633,7 @@ app.post("/api/videos/:id/render", async (req, res) => {
   }
 
   // Catch a used-up voice quota now, before spending AI calls on a video that can't finish.
-  const needed = video.script.replace(/\[[^\]]*\]/g, "").replace(/\s+/g, " ").trim().length;
+  const needed = prepareScript(video.script).spoken.replace(/\[[^\]]*\]/g, "").replace(/\s+/g, " ").trim().length;
   const usage = voice.engine === "elevenlabs" ? await voiceCharactersLeft() : null;
   if (usage && usage.limit > 0 && usage.limit - usage.used < needed) {
     const left = Math.max(0, usage.limit - usage.used);

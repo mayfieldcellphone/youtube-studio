@@ -3,8 +3,10 @@ import path from "node:path";
 import { DATA_DIR, type Channel } from "./db";
 import { DEFAULT_VOICE_ID, ELEVEN_ACTING_MODEL, elevenSpeak, listVoices as listElevenVoices, voiceConfigured as elevenConfigured, type Word } from "./media";
 import { narrateWithEleven, wordsPerMinute } from "./narration";
-import { audioDuration, joinWithGaps, masterVoice } from "./audioPost";
-import { DEFAULT_PRESETS, gapSeconds, modelChain, presetFor, resolvePresets, type PresetId, type VoicePreset } from "./voicePresets";
+import { applyFx, audioDuration, joinWithGaps, masterVoice } from "./audioPost";
+import { isConversation, planDialogueGroups, speakDialogue } from "./dialogue";
+import type { CharacterFx } from "./characterFx";
+import { characterPreset, DEFAULT_PRESETS, gapSeconds, interruptionOverlap, modelChain, presetFor, resolvePresets, type PresetId, type VoicePreset } from "./voicePresets";
 import { db } from "./db";
 
 /**
@@ -77,6 +79,8 @@ export interface SceneAudio {
   duration: number;
   /** Natural silence to leave after this scene, in seconds (the video maker falls back to a default) */
   gapAfter?: number;
+  /** Seconds this line starts before its slot, because the character cuts in on the one before */
+  overlap?: number;
 }
 
 /** How narrator scenes are spoken: which voice preset each uses, and which models to try. */
@@ -95,7 +99,16 @@ export interface CharacterLine {
   voiceId: string;
   /** Delivery cue such as "firm" or "whispering" */
   delivery?: string;
+  /** The character's own voice settings */
+  settings?: { stability?: number; style?: number; speed?: number };
+  /** Sound treatment for their lines */
+  fx?: CharacterFx;
 }
+
+const tagged = (text: string, delivery?: string) => {
+  const cue = delivery?.replace(/[[\]]/g, "").trim();
+  return cue ? `[${cue}] ${text}` : text;
+};
 
 /**
  * Narrates a list of scenes. Gemini and Kokoro read several scenes at once (up to about 45
@@ -117,21 +130,67 @@ export async function synthesizeScenes(
   const results: SceneAudio[] = [];
   const presetOf = (i: number) => narration.presets[presetFor({ keyMoment: narration.keyMoments?.[i] }, narration.format)];
 
-  // Steps: each character scene on its own; narrator scenes one by one (ElevenLabs) or grouped.
+  // Steps: a conversation (two or more characters in a row) is spoken as one dialogue request;
+  // other character scenes on their own; narrator scenes one by one (ElevenLabs) or grouped.
   const steps: number[][] = [];
-  for (const [i, text] of texts.entries()) {
+  const dialogueSteps = new Set<number[]>();
+  const useDialogue = process.env.ELEVENLABS_DIALOGUE !== "off";
+  for (let i = 0; i < texts.length; i++) {
+    if (characters[i]) {
+      let end = i;
+      while (end + 1 < texts.length && characters[end + 1]) end++;
+      const run = Array.from({ length: end - i + 1 }, (_, k) => i + k);
+      const lines = run.map((j) => ({ voiceId: characters[j]!.voiceId, text: tagged(texts[j], characters[j]!.delivery) }));
+      for (const group of useDialogue ? planDialogueGroups(lines) : run.map((_, k) => [k])) {
+        const scenes = group.map((k) => run[k]);
+        if (useDialogue && isConversation(lines, group)) {
+          steps.push(scenes);
+          dialogueSteps.add(scenes);
+        } else for (const j of scenes) steps.push([j]);
+      }
+      i = end;
+      continue;
+    }
     const last = steps[steps.length - 1];
-    const groupable = voice.engine !== "elevenlabs" && !characters[i] && last && !characters[last[0]];
+    const groupable = voice.engine !== "elevenlabs" && last && !characters[last[0]];
     const length = last ? last.reduce((n, j) => n + texts[j].length + 1, 0) : Infinity;
-    if (groupable && length + text.length <= MAX_CHUNK_CHARS) last.push(i);
+    if (groupable && length + texts[i].length <= MAX_CHUNK_CHARS) last.push(i);
     else steps.push([i]);
   }
 
   for (const [c, scenes] of steps.entries()) {
     onProgress(c, steps.length);
     const character = characters[scenes[0]];
+    const modelsFor = () => modelChain(process.env, narration.format);
+    const lineAt = async (i: number) =>
+      speakCharacter(texts[i], characters[i]!, `${outBase}-${i}`, {
+        models: modelsFor(),
+        before: texts[i - 1],
+        after: texts[i + 1],
+        gapSeed: i * 8,
+      });
+    if (dialogueSteps.has(scenes)) {
+      try {
+        const clips = await speakDialogue(
+          scenes.map((i) => ({ voiceId: characters[i]!.voiceId, text: tagged(texts[i], characters[i]!.delivery) })),
+          `${outBase}-${scenes[0]}`,
+          { seed: scenes[0] },
+        );
+        for (const [k, i] of scenes.entries()) {
+          const file = `${outBase}-${i}.wav`;
+          const duration = await applyFx(clips[k].file, file, characters[i]!.fx);
+          fs.rmSync(clips[k].file, { force: true });
+          // The dialogue model already paced the exchange, so only a breath is left between lines.
+          results[i] = { file, duration, words: estimateWords(texts[i], duration), gapAfter: 0.12 };
+        }
+      } catch (err) {
+        console.warn(`Dialogue mode failed, speaking the lines one at a time: ${(err as Error).message}`);
+        for (const i of scenes) results[i] = await lineAt(i);
+      }
+      continue;
+    }
     if (character) {
-      results[scenes[0]] = await speakCharacter(texts[scenes[0]], character, `${outBase}-${scenes[0]}`);
+      results[scenes[0]] = await lineAt(scenes[0]);
       continue;
     }
     if (voice.engine === "elevenlabs") {
@@ -170,30 +229,57 @@ export async function synthesizeScenes(
       results[i] = { file, words: estimateWords(texts[i], duration), duration, gapAfter: gapSeconds(presetOf(i), i * 8 + 7) };
     }
   }
+  // A character who cuts in on the previous line starts slightly early, over its last moments.
+  for (let i = 1; i < results.length; i++) {
+    const own = results[i];
+    if (!characters[i] || !own || !results[i - 1]) continue;
+    const overlap = interruptionOverlap({ text: texts[i - 1], duration: results[i - 1].duration }, characters[i]!.delivery, own.duration);
+    if (overlap > 0) {
+      own.overlap = overlap;
+      results[i - 1].gapAfter = 0;
+    }
+  }
   return results;
 }
 
 /**
- * A character's line in their own voice. Eleven v3 acts the [delivery] cue; if this account
- * can't use v3, the line is read with the narration model without the cue.
+ * A character's line in their own voice. The [delivery] cue is sent as an audio tag to models
+ * that act on tags (v4, v3) and dropped for the rest. Like narration it is spoken sentence by
+ * sentence with the neighbouring lines as context, trimmed to the speech, and then given the
+ * character's sound treatment.
  */
-export async function speakCharacter(text: string, line: CharacterLine, outBase: string): Promise<SceneAudio> {
-  const file = `${outBase}.mp3`;
-  const cue = line.delivery?.replace(/[[\]]/g, "").trim();
-  if (!actingModelFailed) {
-    try {
-      return { file, ...(await elevenSpeak(cue ? `[${cue}] ${text}` : text, line.voiceId, file, ELEVEN_ACTING_MODEL)) };
-    } catch (err) {
-      console.warn(`Eleven v3 unavailable for character lines, using the narration model: ${(err as Error).message}`);
-      // Don't try v3 again for every line of this video; retry on the next one.
-      actingModelFailed = true;
-      setTimeout(() => (actingModelFailed = false), 10 * 60 * 1000).unref();
-    }
+export async function speakCharacter(
+  text: string,
+  line: CharacterLine,
+  outBase: string,
+  ctx: { models: string[]; before?: string; after?: string; gapSeed?: number },
+): Promise<SceneAudio> {
+  const preset = characterPreset(line.settings);
+  const spoken = await narrateWithEleven({
+    text: tagged(text, line.delivery),
+    voiceId: line.voiceId,
+    outBase,
+    preset,
+    models: ctx.models,
+    before: ctx.before,
+    after: ctx.after,
+    gapSeed: ctx.gapSeed,
+  });
+  let file = spoken.file;
+  let duration = spoken.duration;
+  if (line.fx && line.fx !== "none") {
+    const treated = `${outBase}-fx.wav`;
+    duration = await applyFx(spoken.file, treated, line.fx);
+    fs.renameSync(treated, spoken.file);
+    file = spoken.file;
   }
-  return { file, ...(await elevenSpeak(text, line.voiceId, file)) };
+  return {
+    file,
+    duration,
+    words: spoken.words.length ? spoken.words : estimateWords(text, duration),
+    gapAfter: gapSeconds(preset, (ctx.gapSeed ?? 0) + 7),
+  };
 }
-
-let actingModelFailed = false;
 
 const MAX_CHUNK_CHARS = 700;
 

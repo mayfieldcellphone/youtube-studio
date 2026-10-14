@@ -88,7 +88,7 @@ async function render(videoId: string) {
       return member;
     });
     const characters: (CharacterLine | undefined)[] = members.map(
-      (member, i) => member && { voiceId: member.voiceId, delivery: scenes[i].delivery },
+      (member, i) => member && { voiceId: member.voiceId, delivery: scenes[i].delivery, settings: member.settings, fx: member.fx },
     );
     if (characters.some(Boolean) && !voiceConfigured()) {
       throw new Error("This script has character lines, which are voiced by ElevenLabs. Add your ElevenLabs key on the Setup page, or remove the speaker labels from the script.");
@@ -111,6 +111,11 @@ async function render(videoId: string) {
       },
     );
     const voices = narrated.map((v) => ({ ...v, duration: Math.max(v.duration, 0.5) + (v.gapAfter ?? GAP) }));
+    // [PAUSE: 600ms] in the screenplay: silence before the scene it precedes.
+    for (const [i, scene] of scenes.entries()) {
+      const pause = (scene.cues ?? []).filter((c) => c.kind === "pause").reduce((n, c) => n + (c.ms ?? 0), 0) / 1000;
+      if (pause > 0 && i > 0) voices[i - 1].duration += pause;
+    }
 
     // 1b. Characters appear while they speak: their painted portrait, lip-synced to their line
     //     by Hedra when it's set up, otherwise the portrait with a slow push-in.
@@ -258,7 +263,19 @@ async function render(videoId: string) {
     // One continuous voice track, then high-pass, light compression and loudness to -16 LUFS so
     // every voice and engine sits at the same level before the music goes under it.
     stage("Mastering the voice", 81);
-    await ffmpeg(["-f", "concat", "-safe", "0", "-i", "voice.txt", "-c", "copy", "voice-all.wav"], undefined, work);
+    if (voices.some((v) => v.overlap)) {
+      // A character cutting in starts a moment before their slot, over the end of the line before.
+      let at = 0;
+      const delays = voices.map((v) => {
+        const ms = Math.max(0, Math.round((at - (v.overlap ?? 0)) * 1000));
+        at += v.duration;
+        return ms;
+      });
+      const graph = `${delays.map((ms, i) => `[${i}:a]adelay=${ms}|${ms}[d${i}]`).join(";")};${delays.map((_, i) => `[d${i}]`).join("")}amix=inputs=${delays.length}:normalize=0:duration=longest[out]`;
+      await ffmpeg([...voiceParts.flatMap((f) => ["-i", path.basename(f)]), "-filter_complex", graph, "-map", "[out]", "-ac", "2", "voice-all.wav"], undefined, work);
+    } else {
+      await ffmpeg(["-f", "concat", "-safe", "0", "-i", "voice.txt", "-c", "copy", "voice-all.wav"], undefined, work);
+    }
     const mastered = await masterVoice(path.join(work, "voice-all.wav"), path.join(work, "voice-master.wav"));
     console.log(`Voice loudness for ${video.id}: ${mastered.before.input_i.toFixed(1)} LUFS before, ${mastered.after.input_i.toFixed(1)} LUFS after mastering.`);
     fs.mkdirSync(path.join(work, "fonts"));
@@ -410,7 +427,7 @@ const WHITE = "&H00FFFFFF&";
  * pop when a new line appears. Long videos: clean subtitle lines.
  */
 export function buildCaptions(
-  voices: { words: Word[]; duration: number; speaker?: string }[],
+  voices: { words: Word[]; duration: number; speaker?: string; overlap?: number }[],
   portrait: boolean,
   W: number,
   H: number,
@@ -438,19 +455,23 @@ export function buildCaptions(
       for (let k = scene; k < voices.length && voices[k].speaker === voice.speaker; k++) end += voices[k].duration;
       lines.push(label(offset, end, voice.speaker));
     }
+    // A line that cuts in starts speaking before its slot, so its captions move earlier too.
+    const base = offset - (voice.overlap ?? 0);
     for (let i = 0; i < voice.words.length; i += perLine) {
       const chunk = voice.words.slice(i, i + perLine);
       const next = voice.words[i + perLine];
       // Hold each line until the next one starts, so captions don't flicker between words.
-      const chunkEnd = offset + (next ? next.start : chunk[chunk.length - 1].end + 0.25);
+      // The last caption of a line clears before the next speaker cuts in.
+      const slotEnd = offset + voice.duration - (voices[scene + 1]?.overlap ?? 0);
+      const chunkEnd = Math.max(base + chunk[0].start + 0.1, Math.min(base + (next ? next.start : chunk[chunk.length - 1].end + 0.25), next ? Infinity : slotEnd));
       if (!portrait) {
         const text = chunk.map((w) => clean(w.text)).join(" ");
-        lines.push(`Dialogue: 0,${assTime(offset + chunk[0].start)},${assTime(chunkEnd)},Default,,0,0,0,,${text}`);
+        lines.push(`Dialogue: 0,${assTime(base + chunk[0].start)},${assTime(chunkEnd)},Default,,0,0,0,,${text}`);
         continue;
       }
       chunk.forEach((word, j) => {
-        const start = offset + word.start;
-        const end = j + 1 < chunk.length ? offset + chunk[j + 1].start : chunkEnd;
+        const start = base + word.start;
+        const end = j + 1 < chunk.length ? base + chunk[j + 1].start : chunkEnd;
         const text = chunk
           .map((w, k) => (k === j ? `{\\c${GOLD}}${clean(w.text)}{\\c${WHITE}}` : clean(w.text)))
           .join(" ");

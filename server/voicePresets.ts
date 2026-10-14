@@ -159,3 +159,37 @@ export function gapSeconds(preset: Pick<VoicePreset, "gapMs">, n: number): numbe
   const [lo, hi] = preset.gapMs;
   return (lo + (hi - lo) * unit) / 1000;
 }
+
+/** Starting point for a character's lines: more expressive than narration, no extra tempo. */
+export const CHARACTER_BASE: VoicePreset = {
+  label: "Character dialogue",
+  description: "Used for characters speaking in their own voice.",
+  stability: 0.4,
+  similarity: 0.8,
+  style: 0.45,
+  speed: 1,
+  gapMs: [120, 260],
+  tempo: 1,
+};
+
+/** A character's voice settings: the character base, overridden by that character's own settings. */
+export function characterPreset(settings?: { stability?: number; style?: number; speed?: number }): VoicePreset {
+  const pick = (v: number | undefined, base: number, lo: number, hi: number) =>
+    typeof v === "number" && Number.isFinite(v) ? clamp(v, lo, hi) : base;
+  return {
+    ...CHARACTER_BASE,
+    stability: pick(settings?.stability, CHARACTER_BASE.stability, 0, 1),
+    style: pick(settings?.style, CHARACTER_BASE.style, 0, 1),
+    speed: pick(settings?.speed, CHARACTER_BASE.speed, 0.7, 1.2),
+  };
+}
+
+/** Seconds a line should start before its slot because the speaker cuts in; 0 for no overlap. */
+export function interruptionOverlap(prev: { text: string; duration: number } | undefined, delivery: string | undefined, ownDuration: number): number {
+  if (!prev) return 0;
+  const cutIn = /interrupt|cuts? in|cutting in|talks? over|talking over|overlap/i.test(delivery ?? "");
+  const cutOff = /(—|–|--|-)\s*$/.test(prev.text.trim());
+  if (!cutIn && !cutOff) return 0;
+  // Slight: a quarter second, never more than a third of either line.
+  return Math.max(0, Math.min(0.25, prev.duration / 3, ownDuration / 3));
+}

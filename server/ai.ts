@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Channel, Research, Video } from "./db";
 import { google } from "./veo";
 import { allCast, NARRATOR, parseLine, scriptSpeakers, speakerKey } from "./speakers";
+import { anchorCues, prepareScript } from "./screenplay";
 
 /** Current Claude model. If it declines a request, the API retries on Anthropic's recommended fallback model. */
 const CLAUDE_MODEL = "claude-opus-5-5";
@@ -488,7 +489,15 @@ export interface Scene {
   keyMoment: boolean;
   /** The scene's shots; its time is split between them. */
   shots: Shot[];
+  /** Sound cues from the screenplay, in script order, placed before this scene's speech */
+  cues?: SceneCue[];
   fallbackQuery: string;
+}
+
+export interface SceneCue {
+  kind: "sfx" | "music" | "pause";
+  text?: string;
+  ms?: number;
 }
 
 export interface Shot {
@@ -502,18 +511,28 @@ export interface Shot {
 export async function planScenes(channel: Channel, video: Video) {
   // A long script is planned in parts at the same time: one reply can't hold a detailed
   // shot list for a whole 10-minute video.
-  const parts = splitScript(video.script, 250);
+  // Screenplay tags ([HOUDINI | tired], [SFX: ...], [PAUSE: 600ms]) are turned into the plain
+  // labelled form the planner reads; the sound cues are attached to their scenes afterwards.
+  const prepared = prepareScript(video.script);
+  const planVideo: Video = { ...video, script: prepared.spoken };
+  const parts = splitScript(prepared.spoken, 250);
   const planned: Scene[][] = new Array(parts.length);
   let next = 0;
   const worker = async () => {
     while (next < parts.length) {
       const i = next++;
-      planned[i] = await planPart(channel, video, parts, i);
+      planned[i] = await planPart(channel, planVideo, parts, i);
     }
   };
   await Promise.all(Array.from({ length: Math.min(4, parts.length) }, worker));
   const scenes = planned.flat();
   if (!scenes.length) throw new Error("The script has no spoken lines to narrate.");
+  const anchors = anchorCues(prepared.cues, scenes.map((s) => s.narration));
+  prepared.cues.forEach((cue, k) => {
+    const scene = scenes[anchors[k]];
+    if (!scene) return;
+    (scene.cues ??= []).push({ kind: cue.kind, ...(cue.text ? { text: cue.text } : {}), ...(cue.ms ? { ms: cue.ms } : {}) });
+  });
   return scenes;
 }
 

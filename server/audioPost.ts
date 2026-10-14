@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { spawn } from "node:child_process";
 import ffmpegPath from "ffmpeg-static";
 import { MAX_TEMPO, MIN_TEMPO } from "./voicePresets";
+import { FX_FILTERS, type CharacterFx } from "./characterFx";
 
 /**
  * FFmpeg audio post-processing for narration: trimming each clip to the speech, joining clips
@@ -134,4 +135,19 @@ export async function masterVoice(src: string, out: string): Promise<{ before: L
   const filter = [...VOICE_CHAIN, `${LOUDNORM}:${measured}:linear=true`, `aresample=${SAMPLE_RATE}`].join(",");
   await runFfmpeg(["-i", src, "-af", filter, "-ar", String(SAMPLE_RATE), out]);
   return { before: await measureLoudness(src), after: await measureLoudness(out) };
+}
+
+/**
+ * Gives a character's line its own space (room, radio, intimacy). Reverb and echo get silence
+ * to ring into so the tail isn't cut off. Returns the new length in seconds.
+ */
+export async function applyFx(src: string, out: string, fx: CharacterFx | undefined): Promise<number> {
+  const filters = FX_FILTERS[fx ?? "none"];
+  if (!filters.length) {
+    if (src !== out) fs.copyFileSync(src, out);
+    return audioDuration(out);
+  }
+  const tail = fx === "hall" ? ["apad=pad_dur=0.35"] : [];
+  await runFfmpeg(["-i", src, "-af", [...tail, ...filters, `aresample=${SAMPLE_RATE}`].join(","), "-ac", "1", "-ar", String(SAMPLE_RATE), out]);
+  return audioDuration(out);
 }

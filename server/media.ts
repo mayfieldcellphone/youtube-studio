@@ -2,7 +2,7 @@ import fs from "node:fs";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { isAudioTag } from "./speakers";
-import { MAX_SETTINGS_LEVEL, settingsFor, type VoicePreset } from "./voicePresets";
+import { MAX_SETTINGS_LEVEL, settingsFor, supportsAudioTags, type VoicePreset } from "./voicePresets";
 
 // ---------- ElevenLabs (voiceover) ----------
 
@@ -23,7 +23,7 @@ export class ElevenError extends Error {
   }
 }
 
-async function eleven(path: string, init?: RequestInit) {
+export async function eleven(path: string, init?: RequestInit) {
   const res = await fetch(`https://api.elevenlabs.io${path}`, {
     ...init,
     headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY ?? "", "Content-Type": "application/json", ...init?.headers },
@@ -275,7 +275,8 @@ export async function speakChunk(
         const data = await eleven(`/v1/text-to-speech/${voiceId}/with-timestamps?output_format=mp3_44100_128`, {
           method: "POST",
           body: JSON.stringify({
-            text,
+            // Models without audio tags would read "[firm]" aloud, so the tags are dropped for them.
+            text: supportsAudioTags(model) ? text : text.replace(/\[[^\]]*\]\s*/g, "").trim(),
             model_id: model,
             voice_settings: settingsFor(model, opts.preset, level),
             ...(useContext && opts.previousText ? { previous_text: opts.previousText } : {}),
