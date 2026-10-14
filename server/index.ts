@@ -18,6 +18,9 @@ import { privacyPage, termsPage } from "./legal";
 import { hedraConfigured } from "./hedra";
 import { ensurePortrait, portraitFile } from "./portraits";
 import { speakerKey } from "./speakers";
+import { prepareScript } from "./screenplay";
+import { CHARACTER_FX } from "./characterFx";
+import { DEFAULT_PRESETS, PRESET_IDS, resolvePresets } from "./voicePresets";
 import { appUrl, describeSettings, keyProblems, loadSettings, saveSettings, SETTING_KEYS, wrongBox, type SettingKey } from "./settings";
 
 loadSettings();
@@ -199,6 +202,21 @@ app.put("/api/settings", (req, res) => {
 
 // ---------- Channels ----------
 
+/** Voice details for a cast member, shared by the channel's cast and a video's cast. */
+const castVoiceDetails = {
+  age: z.string().trim().max(40).optional(),
+  accent: z.string().trim().max(60).optional(),
+  tone: z.string().trim().max(100).optional(),
+  settings: z
+    .object({
+      stability: z.number().min(0).max(1).optional(),
+      style: z.number().min(0).max(1).optional(),
+      speed: z.number().min(0.7).max(1.2).optional(),
+    })
+    .optional(),
+  fx: z.enum(CHARACTER_FX).optional(),
+};
+
 const channelInput = z.object({
   name: z.string().trim().min(1).max(100),
   niche: z.string().trim().min(1).max(500),
@@ -212,6 +230,9 @@ const channelInput = z.object({
   voiceId: z.string().max(100).optional(),
   voiceStyle: z.string().max(600).optional(),
   look: z.enum(["cinematic", "clean", "warm"]).optional(),
+  grade: z.enum(["none", "sepia", "desaturated"]).optional(),
+  grain: z.boolean().optional(),
+  letterbox: z.boolean().optional(),
   visuals: z.enum(["stock", "pictures"]).optional(),
   pictureStyle: z.string().max(600).optional(),
   aiFootage: z.enum(["off", "hook", "key", "all"]).optional(),
@@ -223,6 +244,7 @@ const channelInput = z.object({
         // Becomes the script label, e.g. "Joan" for lines starting "JOAN:".
         name: z.string().trim().min(1).max(40).regex(/^[A-Za-z][A-Za-z .'’-]*$/, "Character names can use letters, spaces, dots, apostrophes and hyphens."),
         voiceId: z.string().trim().min(1).max(100),
+        ...castVoiceDetails,
       }),
     )
     .max(20)
@@ -450,6 +472,7 @@ app.put("/api/videos/:id/cast", async (req, res) => {
               appearance: z.string().trim().max(1000).default(""),
               voiceId: z.string().trim().max(100).optional(),
               generatedVoiceId: z.string().trim().max(200).optional(),
+              ...castVoiceDetails,
             })
             .refine((c) => c.voiceId || c.generatedVoiceId, "Choose a voice for every character."),
         )
@@ -467,7 +490,20 @@ app.put("/api/videos/:id/cast", async (req, res) => {
     const previous = before.find((p) => speakerKey(p.name) === speakerKey(c.name));
     const appearance = c.appearance || previous?.appearance;
     const portraits = previous && (previous.appearance ?? "") === (appearance ?? "") ? previous.portraits : undefined;
-    cast.push({ name: c.name, role: c.role || undefined, description: c.description || undefined, appearance, voiceId, portraits });
+    cast.push({
+      name: c.name,
+      role: c.role || undefined,
+      description: c.description || undefined,
+      appearance,
+      voiceId,
+      portraits,
+      // Left out of the request: keep what was saved. Sent empty: clear it.
+      age: (c.age ?? previous?.age) || undefined,
+      accent: (c.accent ?? previous?.accent) || undefined,
+      tone: (c.tone ?? previous?.tone) || undefined,
+      settings: c.settings ?? previous?.settings,
+      fx: c.fx ?? previous?.fx,
+    });
   }
   // Delete portraits of removed characters, or ones replaced because the look changed.
   const kept = new Set(cast.flatMap((c) => Object.values(c.portraits ?? {})));
@@ -528,12 +564,49 @@ app.get("/api/voices", async (req, res) => {
 });
 
 app.post("/api/voices/preview", async (req, res) => {
-  const voice = z
-    .object({ engine: engineParam, voiceId: z.string().max(100).optional(), style: z.string().max(300).optional() })
+  const body = z
+    .object({
+      engine: engineParam,
+      voiceId: z.string().max(100).optional(),
+      style: z.string().max(300).optional(),
+      preset: z.enum(PRESET_IDS).optional(),
+    })
     .parse(req.body);
+  const voice = { engine: body.engine, voiceId: body.voiceId, style: body.style };
   if (!engineReady(voice.engine)) throw new HttpError(400, "Add this voice engine's key on the Setup page first.");
-  const file = await previewVoice(voice, path.join(WORK_DIR, "previews"));
-  res.sendFile(file, () => fs.rm(file, { force: true }, () => {}));
+  if (!ffmpegAvailable()) throw new HttpError(500, "FFmpeg is missing. Run npm install again.");
+  // About 20 seconds, made with the same steps as a real video, so what you hear is what you get.
+  const preview = await previewVoice(voice, path.join(WORK_DIR, "previews"), body.preset);
+  res.set({
+    "X-Preview-Duration": preview.duration.toFixed(1),
+    "X-Preview-WPM": String(preview.wpm),
+    "X-Preview-LUFS": preview.lufs.toFixed(1),
+    "X-Preview-Preset": preview.preset,
+  });
+  res.sendFile(preview.file, () => fs.rm(preview.file, { force: true }, () => {}));
+});
+
+// Voice presets: how fast and how expressive each kind of scene is read. Saved values override the defaults.
+const presetValues = z
+  .object({
+    stability: z.number().min(0).max(1),
+    similarity: z.number().min(0).max(1),
+    style: z.number().min(0).max(1),
+    speed: z.number().min(0.7).max(1.2),
+    gapMs: z.tuple([z.number().min(0).max(2000), z.number().min(0).max(3000)]),
+    tempo: z.number().min(1).max(1.08),
+  })
+  .partial();
+const presetsInput = z.object(Object.fromEntries(PRESET_IDS.map((id) => [id, presetValues.optional()])) as Record<(typeof PRESET_IDS)[number], z.ZodOptional<typeof presetValues>>);
+
+app.get("/api/voice/presets", (_req, res) => {
+  res.json({ presets: resolvePresets(db.voicePresets()), defaults: DEFAULT_PRESETS });
+});
+
+/** Send {} to go back to the defaults. */
+app.put("/api/voice/presets", (req, res) => {
+  db.setVoicePresets(presetsInput.parse(req.body));
+  res.json({ presets: resolvePresets(db.voicePresets()), defaults: DEFAULT_PRESETS });
 });
 
 app.get("/api/voice/usage", async (_req, res) => {
@@ -564,7 +637,7 @@ app.post("/api/videos/:id/render", async (req, res) => {
   }
 
   // Catch a used-up voice quota now, before spending AI calls on a video that can't finish.
-  const needed = video.script.replace(/\[[^\]]*\]/g, "").replace(/\s+/g, " ").trim().length;
+  const needed = prepareScript(video.script).spoken.replace(/\[[^\]]*\]/g, "").replace(/\s+/g, " ").trim().length;
   const usage = voice.engine === "elevenlabs" ? await voiceCharactersLeft() : null;
   if (usage && usage.limit > 0 && usage.limit - usage.used < needed) {
     const left = Math.max(0, usage.limit - usage.used);

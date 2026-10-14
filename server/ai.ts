@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Channel, Research, Video } from "./db";
 import { google } from "./veo";
 import { allCast, NARRATOR, parseLine, scriptSpeakers, speakerKey } from "./speakers";
+import { anchorCues, prepareScript } from "./screenplay";
 
 /** Current Claude model. If it declines a request, the API retries on Anthropic's recommended fallback model. */
 const CLAUDE_MODEL = "claude-opus-5-5";
@@ -324,7 +325,9 @@ function scriptCraft(video: Video) {
   return `${shape}
 
 VOICE AND STYLE (this is narration for a voiceover, so write for the ear):
-- Short sentences. Mix in a longer one for rhythm. One idea per sentence.
+- The first sentence is the hook and must land inside the first 5 seconds of speech: a concrete, startling moment, not background.
+- Short, punchy sentences. Vary the length on purpose: a run of short ones, then one long sentence that rolls, then a very short one to land the beat. One idea per sentence.
+- Keep what is confirmed apart from what is disputed. Confirmed facts are stated flatly ("Records show…"); disputed or unproven claims are labelled as such in the same breath ("Some researchers believe…", "No document proves it, but…"). Never state a theory as fact.
 - Concrete and sensory: names, places, dates, numbers, what it looked, sounded and felt like. Show, don't summarise.
 - Use present tense for dramatic moments ("It's 2 a.m. The radio goes silent.").
 - Occasionally speak to the viewer as "you" to pull them in.
@@ -345,15 +348,29 @@ function castCraft(channel: Channel, video: Video) {
   const cast = allCast(channel, video);
   const names = cast.map((c) => speakerKey(c.name));
   if (!names.length) return "";
-  const who = cast.map((c) => `${speakerKey(c.name)}${c.role ? ` (${c.role})` : ""}`).join(", ");
+  const who = cast
+    .map((c) => `${speakerKey(c.name)}${c.role ? ` (${c.role})` : ""}${c.tone ? `, voice: ${c.tone}` : ""}`)
+    .join("; ");
   return `
 
-CHARACTER VOICES (this video has actors for these speakers: ${who}):
-- You may add 2-4 short dramatised scenes where real people from the story speak in their own voice. Keep character lines to about 20-30% of the spoken words; the narrator carries the story.
-- Write each spoken character line on its own line, starting with the speaker label in capitals and a colon, and optionally one delivery cue in square brackets: "JOAN: [firm] I deny it entirely."
-- Only use speaker labels from this list: ${names.join(", ")}, plus NARRATOR. Lines with no label are read by the narrator.
-- Use words actually recorded in the research (trial records, letters, inscriptions) wherever they exist. Invented lines must be short, plausible for the person and the era, and never presented as a quote. Just before each scene, the narrator signals it is a reconstruction ("Imagine the courtroom that morning.").
-- Delivery cues are one or two words describing how the line is spoken (firm, whispering, afraid, cold, laughing). Visual directions stay on their own line in [square brackets] with no label.`;
+SCREENPLAY FORMAT (this video has actors for these speakers: ${who}):
+Write the script as a screenplay, one event per line:
+[NARRATOR] The documentary voice: facts, context, transitions. Most lines are this.
+[SPEAKER | emotion] A character speaking in their own voice, e.g. [HOUDINI | tired, whispering] I can still feel the blow.
+[SFX: train whistle] A sound effect, on its own line, only where it adds atmosphere.
+[MUSIC: low strings, tense] A change in the music, on its own line, rarely. Use "out" or "silence" to drop the music completely until the next [MUSIC] line, and "swell" to lift it for a climax.
+[AMBIENCE: rain on a tin roof] A quiet looping sound bed for the location, placed where the scene changes place. It plays until the next [AMBIENCE] line.
+[CHAPTER: The Hospital] Between the chapters of a long video: plays a short stinger. Skip it in Shorts.
+[PAUSE: 600ms] A deliberate silence before the next line (200-1500 ms), used for dread, a reveal or after a shock.
+Visual directions go on their own line in [square brackets] with no label or colon, e.g. [slow push-in on the empty tent]; they are not spoken.
+
+Rules for characters:
+- Only use these speaker labels: ${names.join(", ")}, plus NARRATOR. A line with no tag is read by the narrator.
+- Character dialogue is at most 30-40% of the spoken words; the narrator carries the story and every fact.
+- Put dialogue at the key moments (a confrontation, a confession, a last goodbye), in short exchanges of 2-6 lines, not speeches. Open each dramatised scene with a narrator line that signals it ("Imagine the room that night.").
+- Emotion tags are one to three words describing how the line is spoken (firm, whispering, afraid, cold, laughing, interrupting). Use "interrupting" when a character cuts in on the one before, and end the line that gets cut off with a dash.
+- Use words actually recorded in the research (trial records, letters, inscriptions) only where they exist, and mark such a line with its source: [HOUDINI | firm] [SOURCE: letter to his brother, 1924] The words as recorded. Every other character line is a reconstruction: it must be short, plausible for the person and era, and must never be presented as something they really said. Never put invented words in a real person's mouth as a quote.
+- A line that is an invented reconstruction needs no extra tag (it is treated as dramatised); do not write the narrator as saying "he said" before an invented line.`;
 }
 
 export async function generateScript(channel: Channel, video: Video) {
@@ -384,7 +401,7 @@ ${draft.script}
 
 First, list the biggest problems briefly: a hook that needs context to understand, slow or generic lines, clichés, vague statements, too many names, dates and numbers to follow by ear, no person to care about, missing tension or re-hook, a flat or anticlimactic ending, facts not supported by the research, lines that are hard to say aloud.
 Judge it as a viewer scrolling at midnight: would they stop at line 1, and still be there at the end?
-Then rewrite the whole script to fix them. Keep every fact accurate, keep it the right length, and make every line earn its place.
+Then rewrite the whole script to fix them. Keep every fact accurate, keep it the right length, and make every line earn its place. If the script uses screenplay tags ([NARRATOR], [NAME | emotion], [SFX: ...], [MUSIC: ...], [PAUSE: ...], [SOURCE: ...]), keep that exact format on every line.
 
 The standard it must meet:
 ${scriptCraft(video)}${castCraft(channel, video)}`,
@@ -488,7 +505,15 @@ export interface Scene {
   keyMoment: boolean;
   /** The scene's shots; its time is split between them. */
   shots: Shot[];
+  /** Sound cues from the screenplay, in script order, placed before this scene's speech */
+  cues?: SceneCue[];
   fallbackQuery: string;
+}
+
+export interface SceneCue {
+  kind: "sfx" | "music" | "ambience" | "chapter" | "pause";
+  text?: string;
+  ms?: number;
 }
 
 export interface Shot {
@@ -502,18 +527,28 @@ export interface Shot {
 export async function planScenes(channel: Channel, video: Video) {
   // A long script is planned in parts at the same time: one reply can't hold a detailed
   // shot list for a whole 10-minute video.
-  const parts = splitScript(video.script, 250);
+  // Screenplay tags ([HOUDINI | tired], [SFX: ...], [PAUSE: 600ms]) are turned into the plain
+  // labelled form the planner reads; the sound cues are attached to their scenes afterwards.
+  const prepared = prepareScript(video.script);
+  const planVideo: Video = { ...video, script: prepared.spoken };
+  const parts = splitScript(prepared.spoken, 250);
   const planned: Scene[][] = new Array(parts.length);
   let next = 0;
   const worker = async () => {
     while (next < parts.length) {
       const i = next++;
-      planned[i] = await planPart(channel, video, parts, i);
+      planned[i] = await planPart(channel, planVideo, parts, i);
     }
   };
   await Promise.all(Array.from({ length: Math.min(4, parts.length) }, worker));
   const scenes = planned.flat();
   if (!scenes.length) throw new Error("The script has no spoken lines to narrate.");
+  const anchors = anchorCues(prepared.cues, scenes.map((s) => s.narration));
+  prepared.cues.forEach((cue, k) => {
+    const scene = scenes[anchors[k]];
+    if (!scene) return;
+    (scene.cues ??= []).push({ kind: cue.kind, ...(cue.text ? { text: cue.text } : {}), ...(cue.ms ? { ms: cue.ms } : {}) });
+  });
   return scenes;
 }
 
@@ -547,10 +582,17 @@ async function planPart(channel: Channel, video: Video, parts: string[], index: 
       ? `Script:\n${parts[0]}`
       : `The whole script, for context only (keep people, places and era consistent with it):\n${video.script}\n\n` +
         `Only turn THIS PART (part ${index + 1} of ${parts.length}) into scenes:\n${parts[index]}`;
+  // Recurring characters keep one look: the same description is repeated in every picture they appear in.
+  const looks = allCast(channel, video).filter((c) => c.appearance);
+  const castLooks = looks.length
+    ? `\nCHARACTER LOOKS (when a shot shows one of these people, repeat their description word for word inside "picture" and "aiPrompt", in the same clothes and era, so they look like the same person in every shot):\n${looks
+        .map((c) => `- ${speakerKey(c.name)}: ${c.appearance}`)
+        .join("\n")}\nFor lines spoken by a character, prefer over-the-shoulder shots, silhouettes, hands and objects, or a reaction cutaway over a straight-on face, unless the scene is a close-up of that character.\n`
+    : "";
   const prompt = `${channelBrief(channel)}
 
 ${script}
-
+${castLooks}
 Turn this script into scenes for an automatically edited ${video.format === "short" ? "vertical YouTube Short" : "horizontal YouTube video"}.
 - "narration": the exact words spoken in this scene, copied from the script in order. Remove visual directions in [square brackets] and any speaker labels. Together, the scenes must contain the whole spoken script.
 - "speaker": who speaks the scene. A script line that starts with a capitalised label and a colon ("JOAN: I deny it.") is spoken by that character: give it its own scene with "speaker" set to the label exactly as written ("JOAN"). Every other line is "${NARRATOR}". Never put two speakers in one scene.

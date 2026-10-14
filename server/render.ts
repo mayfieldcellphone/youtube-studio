@@ -3,10 +3,14 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import ffmpegPath from "ffmpeg-static";
-import { db, UPLOAD_DIR, WORK_DIR, type VideoLook } from "./db";
+import { DATA_DIR, db, UPLOAD_DIR, WORK_DIR, type VideoLook } from "./db";
 import { planScenes } from "./ai";
 import { download, findFootage, voiceConfigured, type Footage, type Word } from "./media";
+import { finishingFilters } from "./finishing";
+import { AMBIENCE_GAIN_DB, finalAudioGraph, generateSound, makeStinger, mixBed, musicGainExpression, SFX_GAIN_DB, STINGER_GAIN_DB, timedCues, type BedItem, type TimedCue } from "./soundDesign";
 import { synthesizeScenes, voiceFor, type CharacterLine } from "./voices";
+import { masterVoice } from "./audioPost";
+import { resolvePresets } from "./voicePresets";
 import { castVoice, NARRATOR } from "./speakers";
 import { hedraConfigured, talkingClip } from "./hedra";
 import { ensurePortrait } from "./portraits";
@@ -15,7 +19,7 @@ import { DEFAULT_PICTURE_STYLES, makePictures } from "./images";
 
 const FONT_DIR = path.resolve("assets/fonts");
 const FPS = 30;
-/** Silence after each scene so sentences don't run into each other. */
+/** Silence after a scene when its voice engine didn't set a natural gap (characters, for now). */
 const GAP = 0.25;
 
 export const ffmpegAvailable = () => Boolean(ffmpegPath && fs.existsSync(ffmpegPath));
@@ -86,7 +90,7 @@ async function render(videoId: string) {
       return member;
     });
     const characters: (CharacterLine | undefined)[] = members.map(
-      (member, i) => member && { voiceId: member.voiceId, delivery: scenes[i].delivery },
+      (member, i) => member && { voiceId: member.voiceId, delivery: scenes[i].delivery, settings: member.settings, fx: member.fx },
     );
     if (characters.some(Boolean) && !voiceConfigured()) {
       throw new Error("This script has character lines, which are voiced by ElevenLabs. Add your ElevenLabs key on the Setup page, or remove the speaker labels from the script.");
@@ -101,8 +105,19 @@ async function render(videoId: string) {
       path.join(work, "voice"),
       (done, total) => stage(`Recording voiceover (${done + 1}/${total})`, 6 + (29 * done) / total),
       characters,
+      {
+        format: video.format,
+        presets: resolvePresets(db.voicePresets()),
+        // Key moments of long videos are read with the slower, more dramatic preset.
+        keyMoments: scenes.map((s) => Boolean(s.keyMoment)),
+      },
     );
-    const voices = narrated.map((v) => ({ ...v, duration: Math.max(v.duration, 0.5) + GAP }));
+    const voices = narrated.map((v) => ({ ...v, duration: Math.max(v.duration, 0.5) + (v.gapAfter ?? GAP) }));
+    // [PAUSE: 600ms] in the screenplay: silence before the scene it precedes.
+    for (const [i, scene] of scenes.entries()) {
+      const pause = (scene.cues ?? []).filter((c) => c.kind === "pause").reduce((n, c) => n + (c.ms ?? 0), 0) / 1000;
+      if (pause > 0 && i > 0) voices[i - 1].duration += pause;
+    }
 
     // 1b. Characters appear while they speak: their painted portrait, lip-synced to their line
     //     by Hedra when it's set up, otherwise the portrait with a slow push-in.
@@ -221,7 +236,7 @@ async function render(videoId: string) {
     }
 
     // 4. Edit each shot: crop to fit, slow camera movement, color grade.
-    const look = LOOKS[channel.look ?? "clean"];
+    const look = [LOOKS[channel.look ?? "clean"], ...finishingFilters(channel, W, H)].join(",");
     const segments: string[] = [];
     for (const [i, shot] of shots.entries()) {
       stage(`Editing shots (${i + 1}/${shots.length})`, 55 + (25 * i) / shots.length);
@@ -247,6 +262,24 @@ async function render(videoId: string) {
       fs.writeFileSync(path.join(work, name), files.map((f) => `file '${path.basename(f)}'`).join("\n"));
     writeList("shots.txt", segments);
     writeList("voice.txt", voiceParts);
+    // One continuous voice track, then high-pass, light compression and loudness to -16 LUFS so
+    // every voice and engine sits at the same level before the music goes under it.
+    stage("Mastering the voice", 81);
+    if (voices.some((v) => v.overlap)) {
+      // A character cutting in starts a moment before their slot, over the end of the line before.
+      let at = 0;
+      const delays = voices.map((v) => {
+        const ms = Math.max(0, Math.round((at - (v.overlap ?? 0)) * 1000));
+        at += v.duration;
+        return ms;
+      });
+      const graph = `${delays.map((ms, i) => `[${i}:a]adelay=${ms}|${ms}[d${i}]`).join(";")};${delays.map((_, i) => `[d${i}]`).join("")}amix=inputs=${delays.length}:normalize=0:duration=longest[out]`;
+      await ffmpeg([...voiceParts.flatMap((f) => ["-i", path.basename(f)]), "-filter_complex", graph, "-map", "[out]", "-ac", "2", "voice-all.wav"], undefined, work);
+    } else {
+      await ffmpeg(["-f", "concat", "-safe", "0", "-i", "voice.txt", "-c", "copy", "voice-all.wav"], undefined, work);
+    }
+    const mastered = await masterVoice(path.join(work, "voice-all.wav"), path.join(work, "voice-master.wav"));
+    console.log(`Voice loudness for ${video.id}: ${mastered.before.input_i.toFixed(1)} LUFS before, ${mastered.after.input_i.toFixed(1)} LUFS after mastering.`);
     fs.mkdirSync(path.join(work, "fonts"));
     for (const font of fs.readdirSync(FONT_DIR).filter((f) => /\.(ttf|otf)$/i.test(f))) {
       fs.copyFileSync(path.join(FONT_DIR, font), path.join(work, "fonts", font));
@@ -258,19 +291,27 @@ async function render(videoId: string) {
 
     const music = channel.musicFile && fs.existsSync(channel.musicFile.path) ? channel.musicFile.path : null;
     const fadeOut = Math.max(0, total - 2.5).toFixed(2);
-    const audioGraph = music
-      ? // Music sits quietly under the voice and ducks further whenever the narrator speaks.
-        `[2:a]aresample=44100,volume=0.25,afade=t=in:d=1.5,afade=t=out:st=${fadeOut}:d=2.5[m];` +
-        `[1:a]asplit=2[n1][n2];[m][n1]sidechaincompress=threshold=0.02:ratio=10:attack=15:release=400[duck];` +
-        `[n2][duck]amix=inputs=2:duration=first:normalize=0[a]`
-      : `[1:a]anull[a]`;
+
+    // Sound effects, ambience beds and chapter stingers from the screenplay's cues.
+    let at = 0;
+    const sceneStarts = voices.map((v) => {
+      const start = at;
+      at += v.duration;
+      return start;
+    });
+    const cues = timedCues(scenes, sceneStarts);
+    const bed = await buildEffectBed(cues, total, work, notes);
+    const musicGain = musicGainExpression(cues);
+
+    const audioGraph = finalAudioGraph({ music: Boolean(music), bed: Boolean(bed), musicGain, fadeOut });
     // Rendered in the work folder, then moved: "+faststart" briefly needs twice the file size.
     const rendered = path.join(work, "final.mp4");
     await ffmpeg(
       [
         "-f", "concat", "-safe", "0", "-i", "shots.txt",
-        "-f", "concat", "-safe", "0", "-i", "voice.txt",
+        "-i", "voice-master.wav",
         ...(music ? ["-stream_loop", "-1", "-i", music] : []),
+        ...(bed ? ["-i", path.basename(bed)] : []),
         "-filter_complex", `[0:v]ass=captions.ass:fontsdir=fonts[v];${audioGraph}`,
         "-map", "[v]", "-map", "[a]",
         "-t", total.toFixed(3),
@@ -390,13 +431,20 @@ function shotArgs(
 
 const GOLD = "&H004AB8E8&";
 const WHITE = "&H00FFFFFF&";
+/** Caption colours for characters, in order of first appearance (ASS colours are BGR). */
+const SPEAKER_COLORS = ["&H006B7AFF&", "&H00FFC46B&", "&H00A0E07C&", "&H00FF9BC7&", "&H00C78FFF&", "&H0066D9FF&"];
+export const speakerColors = (speakers: (string | undefined)[]) => {
+  const map = new Map<string, string>();
+  for (const s of speakers) if (s && !map.has(s)) map.set(s, SPEAKER_COLORS[map.size % SPEAKER_COLORS.length]);
+  return map;
+};
 
 /**
  * Word-timed captions. Shorts: 3 big words at a time with the spoken word in gold and a small
  * pop when a new line appears. Long videos: clean subtitle lines.
  */
 export function buildCaptions(
-  voices: { words: Word[]; duration: number; speaker?: string }[],
+  voices: { words: Word[]; duration: number; speaker?: string; overlap?: number }[],
   portrait: boolean,
   W: number,
   H: number,
@@ -414,9 +462,10 @@ export function buildCaptions(
   };
   const lines: string[] = [];
   let offset = 0;
+  const colors = speakerColors(voices.map((v) => v.speaker));
   // A small "DRAMATISATION" label in the top corner while a character speaks.
   const label = (start: number, end: number, speaker: string) =>
-    `Dialogue: 1,${assTime(start)},${assTime(end)},Label,,0,0,0,,${speaker.replace(/[{}\\]/g, "").toUpperCase()} · DRAMATISATION`;
+    `Dialogue: 1,${assTime(start)},${assTime(end)},Label,,0,0,0,,{\\c${colors.get(speaker) ?? WHITE}}${speaker.replace(/[{}\\]/g, "").toUpperCase()}{\\c${WHITE}} · DRAMATISATION`;
   for (const [scene, voice] of voices.entries()) {
     if (voice.speaker && voices[scene - 1]?.speaker !== voice.speaker) {
       // One label per run of lines by the same character.
@@ -424,21 +473,26 @@ export function buildCaptions(
       for (let k = scene; k < voices.length && voices[k].speaker === voice.speaker; k++) end += voices[k].duration;
       lines.push(label(offset, end, voice.speaker));
     }
+    // A line that cuts in starts speaking before its slot, so its captions move earlier too.
+    const base = offset - (voice.overlap ?? 0);
     for (let i = 0; i < voice.words.length; i += perLine) {
       const chunk = voice.words.slice(i, i + perLine);
       const next = voice.words[i + perLine];
       // Hold each line until the next one starts, so captions don't flicker between words.
-      const chunkEnd = offset + (next ? next.start : chunk[chunk.length - 1].end + 0.25);
+      // The last caption of a line clears before the next speaker cuts in.
+      const slotEnd = offset + voice.duration - (voices[scene + 1]?.overlap ?? 0);
+      const chunkEnd = Math.max(base + chunk[0].start + 0.1, Math.min(base + (next ? next.start : chunk[chunk.length - 1].end + 0.25), next ? Infinity : slotEnd));
       if (!portrait) {
-        const text = chunk.map((w) => clean(w.text)).join(" ");
-        lines.push(`Dialogue: 0,${assTime(offset + chunk[0].start)},${assTime(chunkEnd)},Default,,0,0,0,,${text}`);
+        const tint = voice.speaker ? `{\\c${colors.get(voice.speaker) ?? WHITE}}` : "";
+        const text = tint + chunk.map((w) => clean(w.text)).join(" ");
+        lines.push(`Dialogue: 0,${assTime(base + chunk[0].start)},${assTime(chunkEnd)},Default,,0,0,0,,${text}`);
         continue;
       }
       chunk.forEach((word, j) => {
-        const start = offset + word.start;
-        const end = j + 1 < chunk.length ? offset + chunk[j + 1].start : chunkEnd;
+        const start = base + word.start;
+        const end = j + 1 < chunk.length ? base + chunk[j + 1].start : chunkEnd;
         const text = chunk
-          .map((w, k) => (k === j ? `{\\c${GOLD}}${clean(w.text)}{\\c${WHITE}}` : clean(w.text)))
+          .map((w, k) => (k === j ? `{\\c${(voice.speaker && colors.get(voice.speaker)) || GOLD}}${clean(w.text)}{\\c${WHITE}}` : clean(w.text)))
           .join(" ");
         const pop = j === 0 ? "{\\fscx112\\fscy112\\t(0,120,\\fscx100\\fscy100)}" : "";
         lines.push(`Dialogue: 0,${assTime(start)},${assTime(end)},Default,,0,0,0,,${pop}${text}`);
@@ -486,6 +540,42 @@ function moveFile(from: string, to: string) {
 
 // Encoder statistics and progress lines FFmpeg prints on every run; they hide the real error.
 const FFMPEG_NOISE = /^\[(libx264|aac) @|^(frame|size)=|^\s*$|^video:\d/;
+
+/**
+ * Builds the track of sound effects, ambience and stingers from the screenplay's cues, or
+ * returns null when there are none. An effect that can't be made is skipped with a note.
+ */
+async function buildEffectBed(cues: TimedCue[], total: number, work: string, notes: string[]): Promise<string | null> {
+  const items: BedItem[] = [];
+  const cacheDir = path.join(DATA_DIR, "sound-cache");
+  const skipped = new Set<string>();
+  const sfx = cues.filter((c) => c.kind === "sfx");
+  const beds = cues.filter((c) => c.kind === "ambience").sort((a, b) => a.start - b.start);
+  const chapters = cues.filter((c) => c.kind === "chapter");
+
+  for (const cue of sfx) {
+    const file = await generateSound(cue.text, 3, cacheDir, "sfx");
+    if (file) items.push({ file, start: cue.start, gainDb: SFX_GAIN_DB });
+    else skipped.add(cue.text);
+  }
+  for (const [k, cue] of beds.entries()) {
+    if (/\b(off|none|silence|stop|end)\b/i.test(cue.text)) continue;
+    const end = beds[k + 1]?.start ?? total;
+    if (end - cue.start < 1.5) continue;
+    const file = await generateSound(cue.text, 20, cacheDir, "ambience");
+    if (file) items.push({ file, start: cue.start, gainDb: AMBIENCE_GAIN_DB, loopFor: end - cue.start });
+    else skipped.add(cue.text);
+  }
+  if (chapters.length) {
+    const stinger = await makeStinger(path.join(work, "stinger.wav"));
+    for (const cue of chapters) items.push({ file: stinger, start: cue.start, gainDb: STINGER_GAIN_DB });
+  }
+  if (skipped.size) notes.push(`These sound effects couldn't be made, so they were left out: ${[...skipped].join("; ")}.`);
+  if (!items.length) return null;
+  const out = path.join(work, "fx-bed.wav");
+  await mixBed(items, total, out);
+  return out;
+}
 
 function ffmpeg(args: string[], onProgress?: (seconds: number) => void, cwd?: string) {
   return new Promise<void>((resolve, reject) => {

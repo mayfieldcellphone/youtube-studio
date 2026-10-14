@@ -87,11 +87,12 @@ function statsFrom(s?: { subscriberCount?: string | null; viewCount?: string | n
  * Uploads the video and hands scheduling to YouTube: the video is uploaded as private
  * with `publishAt`, and YouTube makes it public at that time even if this app is offline.
  */
-const DRAMATISATION_NOTE = "Contains dramatised scenes with AI voices.";
+const DRAMATISATION_NOTE =
+  "Dramatized dialogue based on historical accounts. Character voices are AI-generated and their lines are reconstructions, not verified quotes unless a source is named.";
 
 /** Videos with acted character lines say so in the description, as well as in the video. */
 function withDisclosure(video: Video) {
-  if (!video.characterVoicesUsed || video.description.includes(DRAMATISATION_NOTE)) return video.description;
+  if (!video.characterVoicesUsed || video.description.includes(DRAMATISATION_NOTE) || video.description.includes("Dramatized dialogue based on historical accounts")) return video.description;
   return `${video.description.trim()}\n\n${DRAMATISATION_NOTE}`.trim();
 }
 

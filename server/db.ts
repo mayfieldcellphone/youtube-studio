@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import type { CharacterFx } from "./characterFx";
+import type { PresetId, VoicePreset } from "./voicePresets";
 
 export const DATA_DIR = path.resolve(process.env.DATA_DIR ?? "data");
 export const UPLOAD_DIR = path.join(DATA_DIR, "uploads");
@@ -44,6 +46,12 @@ export interface Channel {
   affiliateLinks?: string;
   /** Color grade for automatically made videos */
   look?: VideoLook;
+  /** Extra colour grade on top of the look */
+  grade?: "none" | "sepia" | "desaturated";
+  /** Light film grain (bigger files) */
+  grain?: boolean;
+  /** 2.39:1 letterbox bars on horizontal videos */
+  letterbox?: boolean;
   /** Stock footage, or an AI picture drawn for every shot */
   visuals?: "stock" | "pictures";
   /** How AI pictures should look; empty uses a style that fits the look */
@@ -77,6 +85,14 @@ export interface CastMember {
   appearance?: string;
   /** Painted portraits for 16:9 and 9:16 videos (server file paths) */
   portraits?: { landscape?: string; portrait?: string };
+  /** Age, accent and tone of the voice, e.g. "60s", "Hungarian-American", "tired, wry" */
+  age?: string;
+  accent?: string;
+  tone?: string;
+  /** This character's default ElevenLabs voice settings (each 0-1; speed 0.7-1.2) */
+  settings?: { stability?: number; style?: number; speed?: number };
+  /** Sound treatment for their lines (room, radio, intimate) */
+  fx?: CharacterFx;
 }
 
 export interface StoredFile {
@@ -147,9 +163,13 @@ export interface Video {
   updatedAt: string;
 }
 
+/** Voice preset values the user saved; anything missing falls back to the defaults (see voicePresets.ts). */
+export type SavedPresets = Partial<Record<PresetId, Partial<VoicePreset>>>;
+
 interface Data {
   channels: Channel[];
   videos: Video[];
+  voicePresets?: SavedPresets;
 }
 
 function load(): Data {
@@ -174,6 +194,12 @@ export const newId = () => crypto.randomUUID();
 const now = () => new Date().toISOString();
 
 export const db = {
+  voicePresets: () => data.voicePresets ?? {},
+  setVoicePresets(presets: SavedPresets) {
+    data.voicePresets = presets;
+    save();
+  },
+
   channels: () => data.channels,
   channel: (id: string) => data.channels.find((c) => c.id === id),
 

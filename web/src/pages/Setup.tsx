@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Check, Copy, X } from "lucide-react";
-import { api, type SettingKey, type Settings } from "../api";
+import { api, type PresetId, type SettingKey, type Settings, type Voice, type VoicePreset, type VoicePreview } from "../api";
 import { useApp } from "../App";
 import { ErrorBox, PageHeader, Spinner, useAction } from "../components/ui";
 
@@ -108,6 +108,12 @@ export default function Setup() {
         )}
         <p className="mt-2 text-xs text-zinc-500">Then pick a narrator voice for each channel under Edit channel.</p>
       </Section>
+
+      {status.voice && (
+        <Section ok={true} title="2b+. Narration presets">
+          <VoicePresetsEditor />
+        </Section>
+      )}
 
       <Section ok={status.hedra} title="2c. Talking characters (Hedra, optional)">
         <p className="mb-2">
@@ -301,3 +307,85 @@ const Ext = ({ href, children }: { href: string; children: ReactNode }) => (
     {children}
   </a>
 );
+
+const PRESET_ORDER: PresetId[] = ["documentary_narration", "dramatic_reveal", "fast_short"];
+
+function Slider(props: { label: string; value: number; min: number; max: number; step: number; onChange: (v: number) => void; unit?: string }) {
+  return (
+    <label className="block text-xs">
+      <span className="flex justify-between">
+        <span>{props.label}</span>
+        <span className="tabular-nums text-zinc-500">{props.value}{props.unit ?? ""}</span>
+      </span>
+      <input type="range" className="w-full" min={props.min} max={props.max} step={props.step} value={props.value} onChange={(e) => props.onChange(Number(e.target.value))} />
+    </label>
+  );
+}
+
+/** Tune how the narrator sounds: three presets, each previewed with a 20-second sample. */
+function VoicePresetsEditor() {
+  const [presets, setPresets] = useState<Record<PresetId, VoicePreset> | null>(null);
+  const [defaults, setDefaults] = useState<Record<PresetId, VoicePreset> | null>(null);
+  const [voices, setVoices] = useState<Voice[]>([]);
+  const [voiceId, setVoiceId] = useState("");
+  const [stats, setStats] = useState<Record<string, VoicePreview>>({});
+  const { busy, error, setError, run } = useAction();
+
+  useEffect(() => {
+    api.voicePresets().then((r) => { setPresets(r.presets); setDefaults(r.defaults); }).catch((e) => setError(e.message));
+    api.voices("elevenlabs").then(setVoices).catch(() => setVoices([]));
+  }, [setError]);
+
+  if (!presets || !defaults) return <ErrorBox error={error} />;
+  const patch = (id: PresetId, change: Partial<VoicePreset>) => setPresets({ ...presets, [id]: { ...presets[id], ...change } });
+  const save = () => run("save", async () => { const r = await api.saveVoicePresets(presets); setPresets(r.presets); });
+  const reset = () => run("reset", async () => { const r = await api.saveVoicePresets({}); setPresets(r.presets); setStats({}); });
+  const hear = (id: PresetId) =>
+    run(`hear-${id}`, async () => {
+      await api.saveVoicePresets(presets);
+      const p = await api.previewVoiceDetailed({ engine: "elevenlabs", voiceId: voiceId || undefined, preset: id });
+      setStats((s) => ({ ...s, [id]: p }));
+      new Audio(p.url).play().catch(() => undefined);
+    });
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-zinc-500">
+        These starting values are untuned. Press Hear it, listen, adjust, and save. Target pace is about 150-170 words/min for documentaries and 170-190 for Shorts.
+      </p>
+      <select className="w-full" value={voiceId} onChange={(e) => setVoiceId(e.target.value)}>
+        <option value="">Preview voice: default</option>
+        {voices.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+      </select>
+      {PRESET_ORDER.map((id) => {
+        const p = presets[id];
+        const st = stats[id];
+        return (
+          <div key={id} className="card space-y-2 p-3">
+            <div className="font-medium">{p.label}</div>
+            <p className="text-xs text-zinc-500">{p.description}</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Slider label="Stability (lower = more expressive)" value={p.stability} min={0} max={1} step={0.05} onChange={(v) => patch(id, { stability: v })} />
+              <Slider label="Style exaggeration" value={p.style} min={0} max={1} step={0.05} onChange={(v) => patch(id, { style: v })} />
+              <Slider label="Speed" value={p.speed} min={0.7} max={1.2} step={0.01} onChange={(v) => patch(id, { speed: v })} unit="×" />
+              <Slider label="Extra tempo after render" value={p.tempo} min={1} max={1.08} step={0.01} onChange={(v) => patch(id, { tempo: v })} unit="×" />
+              <Slider label="Shortest gap between sentences" value={p.gapMs[0]} min={0} max={800} step={10} onChange={(v) => patch(id, { gapMs: [v, Math.max(v, p.gapMs[1])] })} unit=" ms" />
+              <Slider label="Longest gap between sentences" value={p.gapMs[1]} min={0} max={1200} step={10} onChange={(v) => patch(id, { gapMs: [Math.min(v, p.gapMs[0]), v] })} unit=" ms" />
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <button type="button" className="btn-secondary" disabled={!!busy} onClick={() => hear(id)}>
+                {busy === `hear-${id}` && <Spinner />} Save and hear it
+              </button>
+              {st && <span className="text-xs text-zinc-500">{st.duration?.toFixed(1)} s · {st.wpm} words/min · {st.lufs?.toFixed(1)} LUFS</span>}
+            </div>
+          </div>
+        );
+      })}
+      <div className="flex gap-2">
+        <button type="button" className="btn-secondary" disabled={!!busy} onClick={save}>{busy === "save" && <Spinner />} Save presets</button>
+        <button type="button" className="btn-secondary" disabled={!!busy} onClick={reset}>Reset to defaults</button>
+      </div>
+      <ErrorBox error={error} />
+    </div>
+  );
+}

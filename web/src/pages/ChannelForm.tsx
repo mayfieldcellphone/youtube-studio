@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Plus, X } from "lucide-react";
-import { api, CATEGORIES, DAY_NAMES, type Channel, type Voice, type VoiceEngine } from "../api";
+import { api, CATEGORIES, DAY_NAMES, type Channel, type PresetId, type Voice, type VoiceEngine, type VoicePreview } from "../api";
 import { navigate, useApp } from "../App";
 import { ErrorBox, PageHeader, Spinner, useAction } from "../components/ui";
 
@@ -46,13 +46,15 @@ const PRESETS = [
     postingDays: [0, 3, 5],
     look: "cinematic" as const,
     visuals: "pictures" as const,
-    voiceStyle: "Narrate slowly and suspensefully, like a documentary narrator telling a true mystery, with dramatic pauses",
+    voiceStyle: "A documentary narrator telling a true mystery: steady, confident pace, suspense in the tone rather than in long pauses",
   },
 ];
 
 export default function ChannelForm({ channelId }: { channelId?: string }) {
   const { channels, reloadChannels, status } = useApp();
   const [voices, setVoices] = useState<Voice[]>([]);
+  const [previewPreset, setPreviewPreset] = useState<PresetId>("documentary_narration");
+  const [previewStats, setPreviewStats] = useState<VoicePreview | null>(null);
   // Character voices always come from ElevenLabs, whatever engine the narrator uses.
   const [castVoices, setCastVoices] = useState<Voice[]>([]);
   const [castVoicesError, setCastVoicesError] = useState<string | null>(null);
@@ -208,14 +210,30 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
                 disabled={!!preview.busy}
                 onClick={() =>
                   preview.run("preview", async () =>
-                    setPreviewUrl(await api.previewVoice({ engine, voiceId: form.voiceId || undefined, style: form.voiceStyle || undefined })),
+                    (async () => {
+                      const p = await api.previewVoiceDetailed({ engine, voiceId: form.voiceId || undefined, style: form.voiceStyle || undefined, preset: previewPreset });
+                      setPreviewUrl(p.url);
+                      setPreviewStats(p);
+                    })(),
                   )
                 }
               >
                 {preview.busy && <Spinner />} Preview
               </button>
             </div>
+            {engine === "elevenlabs" && (
+              <select className="mt-2 w-full" value={previewPreset} onChange={(e) => setPreviewPreset(e.target.value as PresetId)}>
+                <option value="documentary_narration">Preview as: documentary narration</option>
+                <option value="dramatic_reveal">Preview as: dramatic reveal</option>
+                <option value="fast_short">Preview as: fast Short</option>
+              </select>
+            )}
             {previewUrl && <audio className="mt-2 w-full" src={previewUrl} controls autoPlay />}
+            {previewUrl && previewStats?.wpm ? (
+              <p className="mt-1 text-xs text-zinc-500">
+                {previewStats.duration?.toFixed(1)} s · {previewStats.wpm} words/min · {previewStats.lufs?.toFixed(1)} LUFS
+              </p>
+            ) : null}
             <ErrorBox error={preview.error} />
           </Field>
         )}
@@ -226,7 +244,7 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
               onChange={(e) => set("voiceStyle", e.target.value)}
               placeholder={
                 form.look === "cinematic"
-                  ? "Default: a seasoned true-crime documentary narrator, low, calm and slow, building tension"
+                  ? "Default: a seasoned true-crime documentary narrator, low, calm and controlled, building tension"
                   : form.look === "warm"
                     ? "Default: a trusted friend who is good with money, warm and confident"
                     : "Default: an energetic but credible tech YouTuber, clear and brisk"
@@ -247,6 +265,21 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
             <option value="clean">Clean: bright and crisp (tech, tutorials)</option>
             <option value="warm">Warm: friendly and golden (money, lifestyle)</option>
           </select>
+        </Field>
+        <Field label="Film finish" hint="Optional cinema touches on top of the look. Letterbox adds 2.39:1 black bars to horizontal videos. Grain adds texture but makes the video file noticeably bigger.">
+          <div className="flex flex-wrap items-center gap-3">
+            <select value={form.grade ?? "none"} onChange={(e) => set("grade", e.target.value as Channel["grade"])}>
+              <option value="none">No extra grade</option>
+              <option value="sepia">Sepia (old photographs)</option>
+              <option value="desaturated">Desaturated (cold archive footage)</option>
+            </select>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={form.letterbox ?? false} onChange={(e) => set("letterbox", e.target.checked)} /> Letterbox 2.39:1
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={form.grain ?? false} onChange={(e) => set("grain", e.target.checked)} /> Film grain
+            </label>
+          </div>
         </Field>
         <Field
           label="Visuals"

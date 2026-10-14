@@ -70,6 +70,7 @@ Create a key at [console.anthropic.com](https://console.anthropic.com) and set `
 - **Kokoro**: free and unlimited, runs on your computer (open-source model, English). No key needed. The first use downloads the model (about 90 MB) into `data/models`.
 - **Gemini**: very natural, and follows a narration style you describe. Create a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) and set `GEMINI_API_KEY`. The free tier allows only a few voice requests per day; turn on billing for regular use.
 - **ElevenLabs**: the most human voice, paid by monthly characters. Create a key at [elevenlabs.io](https://elevenlabs.io) (profile → API Keys, allow Text to Speech, Voices read and write, User read, and Text to Voice if listed, which character voices need) and set `ELEVENLABS_API_KEY`.
+  Narration is spoken sentence by sentence with neighbouring text as context, trimmed to the speech, joined with short natural gaps and mastered to -16 LUFS. Tune pace and expressiveness with the three presets on the Setup page (box 2b+). `ELEVENLABS_MODEL` (default `eleven_v4`, falling back to `eleven_v3`, then `eleven_multilingual_v2`) and `ELEVENLABS_SHORT_MODEL` choose the models.
 
 ElevenLabs returns exact word timings for captions. For Kokoro and Gemini the app estimates them from the text, which stays close because scenes are 1-2 sentences.
 
@@ -92,6 +93,14 @@ Dramatised scenes where people from the story speak in their own voices, while t
 4. **On screen:** each saved character gets a painted portrait (Gemini, from the "how they look" description). While a character speaks, the video shows their portrait lip-synced to their line by [Hedra](https://www.hedra.com) (set `HEDRA_API_KEY` on the Setup page, about $0.05 per second of character speech). Without a Hedra key the portrait is shown still, with a slow push-in. Use **New portrait** or **Change look** on the video page to redo one; the 9:16 version for Shorts is painted from the 16:9 one so the face matches. `HEDRA_MODEL` can force a specific Hedra model. Characters who appear in many videos, such as a host, can be added once under **Edit channel → Recurring character voices**.
 
 Character lines use ElevenLabs Eleven v3, which acts the cue (`[whispering]`, `[afraid]`); if the account can't use v3 the line is read without the cue. A label with no voice in the cast is read by the narrator, with a note. While a character speaks the video shows a small **DRAMATISATION** label, and on upload the video is marked as altered/synthetic content and the description ends with "Contains dramatised scenes with AI voices."
+
+### Cinematic narration, screenplay scripts and sound design
+
+- **Narration** is spoken sentence by sentence (neighbouring text sent as context), trimmed to the speech, joined with 150-350 ms natural gaps, and mastered to -16 LUFS. Three presets (documentary narration, dramatic reveal, fast Short) are tuned on the Setup page (box 2b+) with a "Save and hear it" button that shows words/min and LUFS. The starting values are untuned: listen and adjust.
+- **Models**: `ELEVENLABS_MODEL` (default `eleven_v4`, falling back to `eleven_v3`, then `eleven_multilingual_v2`), optional `ELEVENLABS_SHORT_MODEL`. `ELEVENLABS_DIALOGUE=off` turns off multi-speaker dialogue requests (lines are then spoken one at a time).
+- **Screenplay scripts**: one event per line: `[NARRATOR] text`, `[HOUDINI | tired, whispering] text`, `[SFX: train whistle]`, `[AMBIENCE: rain on a tin roof]`, `[MUSIC: low strings]` (`out` mutes, `swell` lifts), `[PAUSE: 600ms]`, `[CHAPTER: title]` (stinger). Character lines are dramatised unless tagged `[SOURCE: letter, 1924]`. The older `NAME: [cue] text` form still works. Videos with characters get the on-screen DRAMATISATION label, a description note and YouTube's altered/synthetic flag.
+- **Film finish** (Edit channel): sepia or desaturated grade, 2.39:1 letterbox, film grain. Character speech is shown in a colour per speaker.
+- **Compare old and new narration**: `npm run voice:bench -- --video <id>` (needs your ElevenLabs key; about 3,000 characters per run), or `-- --mock` to test the tool without a key.
 
 ### AI pictures (optional, Edit channel → Visuals)
 

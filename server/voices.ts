@@ -2,6 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { DATA_DIR, type Channel } from "./db";
 import { DEFAULT_VOICE_ID, ELEVEN_ACTING_MODEL, elevenSpeak, listVoices as listElevenVoices, voiceConfigured as elevenConfigured, type Word } from "./media";
+import { narrateWithEleven, wordsPerMinute } from "./narration";
+import { applyFx, audioDuration, joinWithGaps, masterVoice } from "./audioPost";
+import { isConversation, planDialogueGroups, speakDialogue } from "./dialogue";
+import type { CharacterFx } from "./characterFx";
+import { characterPreset, DEFAULT_PRESETS, gapSeconds, interruptionOverlap, modelChain, presetFor, resolvePresets, type PresetId, type VoicePreset } from "./voicePresets";
+import { db } from "./db";
 
 /**
  * Narration engines. Each channel picks one:
@@ -37,7 +43,7 @@ export function voiceFor(channel: Channel): VoiceChoice {
 
 export const DEFAULT_STYLES = {
   cinematic:
-    "You are a seasoned true-crime documentary narrator. Speak in a low, calm, intimate voice at a slow pace. Let tension build, pause briefly before reveals, and drop your voice slightly on ominous lines. Never sound cheerful",
+    "You are a seasoned true-crime documentary narrator. Speak in a low, intimate voice at a confident, steady pace that holds attention, a little faster than a slow read. Let tension build with short pauses before reveals, and drop your voice slightly on ominous lines. Never sound cheerful",
   warm: "You are a trusted friend who is good with money. Speak warmly and confidently at a relaxed pace, with a hint of a smile, emphasising the key numbers",
   clean: "You are an energetic but credible tech YouTuber. Speak clearly and briskly, with natural enthusiasm and emphasis on the most useful points",
 } as const;
@@ -71,7 +77,21 @@ export interface SceneAudio {
   file: string;
   words: Word[];
   duration: number;
+  /** Natural silence to leave after this scene, in seconds (the video maker falls back to a default) */
+  gapAfter?: number;
+  /** Seconds this line starts before its slot, because the character cuts in on the one before */
+  overlap?: number;
 }
+
+/** How narrator scenes are spoken: which voice preset each uses, and which models to try. */
+export interface NarrationOptions {
+  format: "short" | "long";
+  presets: Record<PresetId, VoicePreset>;
+  /** Scenes that are key moments; on long videos they use the dramatic_reveal preset */
+  keyMoments?: boolean[];
+}
+
+export const defaultNarration = (): NarrationOptions => ({ format: "long", presets: resolvePresets(db.voicePresets()) });
 
 /** A scene spoken by a character from the channel's cast instead of the narrator. */
 export interface CharacterLine {
@@ -79,7 +99,16 @@ export interface CharacterLine {
   voiceId: string;
   /** Delivery cue such as "firm" or "whispering" */
   delivery?: string;
+  /** The character's own voice settings */
+  settings?: { stability?: number; style?: number; speed?: number };
+  /** Sound treatment for their lines */
+  fx?: CharacterFx;
 }
+
+const tagged = (text: string, delivery?: string) => {
+  const cue = delivery?.replace(/[[\]]/g, "").trim();
+  return cue ? `[${cue}] ${text}` : text;
+};
 
 /**
  * Narrates a list of scenes. Gemini and Kokoro read several scenes at once (up to about 45
@@ -96,28 +125,96 @@ export async function synthesizeScenes(
   outBase: string,
   onProgress: (done: number, total: number) => void,
   characters: (CharacterLine | undefined)[] = [],
+  narration: NarrationOptions = defaultNarration(),
 ): Promise<SceneAudio[]> {
   const results: SceneAudio[] = [];
+  const presetOf = (i: number) => narration.presets[presetFor({ keyMoment: narration.keyMoments?.[i] }, narration.format)];
 
-  // Steps: each character scene on its own; narrator scenes one by one (ElevenLabs) or grouped.
+  // Steps: a conversation (two or more characters in a row) is spoken as one dialogue request;
+  // other character scenes on their own; narrator scenes one by one (ElevenLabs) or grouped.
   const steps: number[][] = [];
-  for (const [i, text] of texts.entries()) {
+  const dialogueSteps = new Set<number[]>();
+  const useDialogue = process.env.ELEVENLABS_DIALOGUE !== "off";
+  for (let i = 0; i < texts.length; i++) {
+    if (characters[i]) {
+      let end = i;
+      while (end + 1 < texts.length && characters[end + 1]) end++;
+      const run = Array.from({ length: end - i + 1 }, (_, k) => i + k);
+      const lines = run.map((j) => ({ voiceId: characters[j]!.voiceId, text: tagged(texts[j], characters[j]!.delivery) }));
+      for (const group of useDialogue ? planDialogueGroups(lines) : run.map((_, k) => [k])) {
+        const scenes = group.map((k) => run[k]);
+        if (useDialogue && isConversation(lines, group)) {
+          steps.push(scenes);
+          dialogueSteps.add(scenes);
+        } else for (const j of scenes) steps.push([j]);
+      }
+      i = end;
+      continue;
+    }
     const last = steps[steps.length - 1];
-    const groupable = voice.engine !== "elevenlabs" && !characters[i] && last && !characters[last[0]];
+    const groupable = voice.engine !== "elevenlabs" && last && !characters[last[0]];
     const length = last ? last.reduce((n, j) => n + texts[j].length + 1, 0) : Infinity;
-    if (groupable && length + text.length <= MAX_CHUNK_CHARS) last.push(i);
+    if (groupable && length + texts[i].length <= MAX_CHUNK_CHARS) last.push(i);
     else steps.push([i]);
   }
 
   for (const [c, scenes] of steps.entries()) {
     onProgress(c, steps.length);
     const character = characters[scenes[0]];
+    const modelsFor = () => modelChain(process.env, narration.format);
+    const lineAt = async (i: number) =>
+      speakCharacter(texts[i], characters[i]!, `${outBase}-${i}`, {
+        models: modelsFor(),
+        before: texts[i - 1],
+        after: texts[i + 1],
+        gapSeed: i * 8,
+      });
+    if (dialogueSteps.has(scenes)) {
+      try {
+        const clips = await speakDialogue(
+          scenes.map((i) => ({ voiceId: characters[i]!.voiceId, text: tagged(texts[i], characters[i]!.delivery) })),
+          `${outBase}-${scenes[0]}`,
+          { seed: scenes[0] },
+        );
+        for (const [k, i] of scenes.entries()) {
+          const file = `${outBase}-${i}.wav`;
+          const duration = await applyFx(clips[k].file, file, characters[i]!.fx);
+          fs.rmSync(clips[k].file, { force: true });
+          // The dialogue model already paced the exchange, so only a breath is left between lines.
+          results[i] = { file, duration, words: estimateWords(texts[i], duration), gapAfter: 0.12 };
+        }
+      } catch (err) {
+        console.warn(`Dialogue mode failed, speaking the lines one at a time: ${(err as Error).message}`);
+        for (const i of scenes) results[i] = await lineAt(i);
+      }
+      continue;
+    }
     if (character) {
-      results[scenes[0]] = await speakCharacter(texts[scenes[0]], character, `${outBase}-${scenes[0]}`);
+      results[scenes[0]] = await lineAt(scenes[0]);
       continue;
     }
     if (voice.engine === "elevenlabs") {
-      results[scenes[0]] = await synthesize(texts[scenes[0]], voice, `${outBase}-${scenes[0]}`);
+      const i = scenes[0];
+      const preset = presetOf(i);
+      // The narration either side of this scene gives its first and last sentences some context.
+      const before = i > 0 && !characters[i - 1] ? texts[i - 1] : undefined;
+      const after = i < texts.length - 1 && !characters[i + 1] ? texts[i + 1] : undefined;
+      const spoken = await narrateWithEleven({
+        text: texts[i],
+        voiceId: voice.voiceId || DEFAULT_VOICE_ID,
+        outBase: `${outBase}-${i}`,
+        preset,
+        models: modelChain(process.env, narration.format),
+        before,
+        after,
+        gapSeed: i * 8,
+      });
+      results[i] = {
+        file: spoken.file,
+        duration: spoken.duration,
+        words: spoken.words.length ? spoken.words : estimateWords(texts[i], spoken.duration),
+        gapAfter: gapSeconds(preset, i * 8 + 7),
+      };
       continue;
     }
     const text = scenes.map((i) => texts[i]).join(" ");
@@ -129,33 +226,60 @@ export async function synthesizeScenes(
       const file = `${outBase}-${i}.wav`;
       writeWav(file, part, raw.rate);
       const duration = part.length / raw.rate;
-      results[i] = { file, words: estimateWords(texts[i], duration), duration };
+      results[i] = { file, words: estimateWords(texts[i], duration), duration, gapAfter: gapSeconds(presetOf(i), i * 8 + 7) };
+    }
+  }
+  // A character who cuts in on the previous line starts slightly early, over its last moments.
+  for (let i = 1; i < results.length; i++) {
+    const own = results[i];
+    if (!characters[i] || !own || !results[i - 1]) continue;
+    const overlap = interruptionOverlap({ text: texts[i - 1], duration: results[i - 1].duration }, characters[i]!.delivery, own.duration);
+    if (overlap > 0) {
+      own.overlap = overlap;
+      results[i - 1].gapAfter = 0;
     }
   }
   return results;
 }
 
 /**
- * A character's line in their own voice. Eleven v3 acts the [delivery] cue; if this account
- * can't use v3, the line is read with the narration model without the cue.
+ * A character's line in their own voice. The [delivery] cue is sent as an audio tag to models
+ * that act on tags (v4, v3) and dropped for the rest. Like narration it is spoken sentence by
+ * sentence with the neighbouring lines as context, trimmed to the speech, and then given the
+ * character's sound treatment.
  */
-export async function speakCharacter(text: string, line: CharacterLine, outBase: string): Promise<SceneAudio> {
-  const file = `${outBase}.mp3`;
-  const cue = line.delivery?.replace(/[[\]]/g, "").trim();
-  if (!actingModelFailed) {
-    try {
-      return { file, ...(await elevenSpeak(cue ? `[${cue}] ${text}` : text, line.voiceId, file, ELEVEN_ACTING_MODEL)) };
-    } catch (err) {
-      console.warn(`Eleven v3 unavailable for character lines, using the narration model: ${(err as Error).message}`);
-      // Don't try v3 again for every line of this video; retry on the next one.
-      actingModelFailed = true;
-      setTimeout(() => (actingModelFailed = false), 10 * 60 * 1000).unref();
-    }
+export async function speakCharacter(
+  text: string,
+  line: CharacterLine,
+  outBase: string,
+  ctx: { models: string[]; before?: string; after?: string; gapSeed?: number },
+): Promise<SceneAudio> {
+  const preset = characterPreset(line.settings);
+  const spoken = await narrateWithEleven({
+    text: tagged(text, line.delivery),
+    voiceId: line.voiceId,
+    outBase,
+    preset,
+    models: ctx.models,
+    before: ctx.before,
+    after: ctx.after,
+    gapSeed: ctx.gapSeed,
+  });
+  let file = spoken.file;
+  let duration = spoken.duration;
+  if (line.fx && line.fx !== "none") {
+    const treated = `${outBase}-fx.wav`;
+    duration = await applyFx(spoken.file, treated, line.fx);
+    fs.renameSync(treated, spoken.file);
+    file = spoken.file;
   }
-  return { file, ...(await elevenSpeak(text, line.voiceId, file)) };
+  return {
+    file,
+    duration,
+    words: spoken.words.length ? spoken.words : estimateWords(text, duration),
+    gapAfter: gapSeconds(preset, (ctx.gapSeed ?? 0) + 7),
+  };
 }
-
-let actingModelFailed = false;
 
 const MAX_CHUNK_CHARS = 700;
 
@@ -412,11 +536,43 @@ export function estimateWords(text: string, duration: number): Word[] {
   });
 }
 
-/** A short sample in the chosen voice for the "Preview" button. */
-export async function previewVoice(voice: VoiceChoice, dir: string) {
-  const text =
-    "In the winter of 1959, nine hikers vanished in the mountains. What they left behind has puzzled investigators ever since.";
+/** About 20 seconds at documentary pace. Three scenes, like a real script. */
+export const PREVIEW_SCENES = [
+  "In the winter of 1959, nine hikers vanished in the mountains. What they left behind has puzzled investigators ever since.",
+  "A tent, cut open from the inside. Boots left in the snow. And a final photograph that nobody can fully explain.",
+  "Tonight, we follow their footsteps, one at a time. Stay with me.",
+];
+
+export interface VoicePreview {
+  file: string;
+  /** Seconds */
+  duration: number;
+  wpm: number;
+  /** Integrated loudness after mastering */
+  lufs: number;
+  preset: PresetId;
+}
+
+/**
+ * A ~20 second sample for the "Preview" button, made with the same steps as a real video:
+ * sentence chunks, natural gaps and voice mastering. `presetId` picks which preset to hear.
+ */
+export async function previewVoice(voice: VoiceChoice, dir: string, presetId: PresetId = "documentary_narration"): Promise<VoicePreview> {
   fs.mkdirSync(dir, { recursive: true });
-  const { file } = await synthesize(text, voice, path.join(dir, `preview-${Date.now()}`));
-  return file;
+  const presets = resolvePresets(db.voicePresets());
+  const chosen = presets[presetId] ?? DEFAULT_PRESETS.documentary_narration;
+  // Every kind of scene uses the chosen preset, so the sample is exactly what it will sound like.
+  const narration: NarrationOptions = {
+    format: "long",
+    presets: { documentary_narration: chosen, dramatic_reveal: chosen, fast_short: chosen },
+  };
+  const base = path.join(dir, `preview-${Date.now()}`);
+  const scenes = await synthesizeScenes(PREVIEW_SCENES, voice, base, () => {}, [], narration);
+  const joined = `${base}-joined.wav`;
+  await joinWithGaps(scenes.map((s) => s.file), scenes.map((s) => s.gapAfter ?? 0.25), joined);
+  const file = `${base}.wav`;
+  const { after } = await masterVoice(joined, file);
+  const duration = await audioDuration(file);
+  for (const f of [joined, ...scenes.map((s) => s.file)]) fs.rmSync(f, { force: true });
+  return { file, duration, wpm: wordsPerMinute(PREVIEW_SCENES.join(" "), duration), lufs: after.input_i, preset: presetId };
 }

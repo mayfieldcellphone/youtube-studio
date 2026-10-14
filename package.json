@@ -6,7 +6,9 @@
     "dev": "tsx watch --ignore web server/index.ts",
     "build": "vite build",
     "start": "tsx server/index.ts --prod",
-    "lint": "tsc"
+    "lint": "tsc",
+    "test": "tsx --test \"server/tests/*.test.ts\"",
+    "voice:bench": "tsx server/bench/voiceBench.ts"
   },
   "repository": {
     "type": "git",
