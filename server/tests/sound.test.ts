@@ -137,3 +137,23 @@ test("letterbox is skipped on vertical video; grade and grain filters run", asyn
   assert.equal(desat.buf.length, 640 * 360 * 3);
   assert.deepEqual(finishingFilters({}, 640, 360), []);
 });
+
+test("the final audio graph is valid FFmpeg for every combination of music and effects", async () => {
+  const { finalAudioGraph } = await import("../soundDesign");
+  const dir = tmpDir("final");
+  const tone = (name: string, f: number) => runFfmpeg(["-f", "lavfi", "-i", `sine=f=${f}:d=8:r=44100,volume=0.2`, "-ac", "2", path.join(dir, name)]);
+  await tone("voice.wav", 180);
+  await tone("music.wav", 330);
+  await tone("bed.wav", 700);
+  const gain = musicGainExpression([{ kind: "music", text: "out", start: 3 }]);
+  for (const music of [false, true]) {
+    for (const bed of [false, true]) {
+      const graph = finalAudioGraph({ music, bed, musicGain: music ? gain : null, fadeOut: "5.50" });
+      // Input 0 stands in for the shots video, as in the real render.
+      const inputs = ["bed.wav", "voice.wav", ...(music ? ["music.wav"] : []), ...(bed ? ["bed.wav"] : [])].flatMap((f) => ["-i", path.join(dir, f)]);
+      const out = path.join(dir, `final-${music}-${bed}.m4a`);
+      await runFfmpeg([...inputs, "-filter_complex", graph, "-map", "[a]", "-t", "8", out]);
+      assert.ok((await audioDuration(out)) > 7.5, `music=${music} bed=${bed}`);
+    }
+  }
+});

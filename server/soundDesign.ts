@@ -155,3 +155,17 @@ export async function mixBed(items: BedItem[], total: number, out: string): Prom
   const graph = `${chains.join(";")};${items.map((_, i) => `[b${i}]`).join("")}amix=inputs=${items.length}:normalize=0:duration=longest,apad,atrim=duration=${total.toFixed(3)}[out]`;
   await runFfmpeg([...args, "-filter_complex", graph, "-map", "[out]", "-ar", String(SAMPLE_RATE), "-ac", "2", out]);
 }
+
+/**
+ * The audio part of the final FFmpeg graph. Input 1 is the mastered voice; the music (when
+ * there is one) is input 2 and the effect bed comes after it. The result is labelled [a].
+ */
+export function finalAudioGraph(o: { music: boolean; bed: boolean; musicGain: string | null; fadeOut: string }): string {
+  if (!o.music) return o.bed ? "[1:a][2:a]amix=inputs=2:duration=first:normalize=0[a]" : "[1:a]anull[a]";
+  const gain = o.musicGain ? `,volume='${o.musicGain}':eval=frame` : "";
+  return (
+    `[2:a]aresample=44100,volume=0.3${gain},afade=t=in:d=1.5,afade=t=out:st=${o.fadeOut}:d=2.5[m];` +
+    `[1:a]asplit=2[n1][n2];[m][n1]${duckFilter()}[duck];` +
+    (o.bed ? "[n2][duck][3:a]amix=inputs=3:duration=first:normalize=0[a]" : "[n2][duck]amix=inputs=2:duration=first:normalize=0[a]")
+  );
+}

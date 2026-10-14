@@ -7,7 +7,7 @@ import { DATA_DIR, db, UPLOAD_DIR, WORK_DIR, type VideoLook } from "./db";
 import { planScenes } from "./ai";
 import { download, findFootage, voiceConfigured, type Footage, type Word } from "./media";
 import { finishingFilters } from "./finishing";
-import { AMBIENCE_GAIN_DB, duckFilter, generateSound, makeStinger, mixBed, musicGainExpression, SFX_GAIN_DB, STINGER_GAIN_DB, timedCues, type BedItem, type TimedCue } from "./soundDesign";
+import { AMBIENCE_GAIN_DB, finalAudioGraph, generateSound, makeStinger, mixBed, musicGainExpression, SFX_GAIN_DB, STINGER_GAIN_DB, timedCues, type BedItem, type TimedCue } from "./soundDesign";
 import { synthesizeScenes, voiceFor, type CharacterLine } from "./voices";
 import { masterVoice } from "./audioPost";
 import { resolvePresets } from "./voicePresets";
@@ -303,16 +303,7 @@ async function render(videoId: string) {
     const bed = await buildEffectBed(cues, total, work, notes);
     const musicGain = musicGainExpression(cues);
 
-    const audioGraph = music
-      ? // Music sits under the voice, ducks about 14 dB whenever someone speaks, and follows [MUSIC] cues.
-        `[2:a]aresample=44100,volume=0.3${musicGain ? `,volume='${musicGain}':eval=frame` : ""},afade=t=in:d=1.5,afade=t=out:st=${fadeOut}:d=2.5[m];` +
-        `[1:a]asplit=2[n1][n2];[m][n1]${duckFilter()}[duck];` +
-        (bed
-          ? `[n2][duck][3:a]amix=inputs=3:duration=first:normalize=0[a]`
-          : `[n2][duck]amix=inputs=2:duration=first:normalize=0[a]`)
-      : bed
-        ? `[1:a][2:a]amix=inputs=2:duration=first:normalize=0[a]`
-        : `[1:a]anull[a]`;
+    const audioGraph = finalAudioGraph({ music: Boolean(music), bed: Boolean(bed), musicGain, fadeOut });
     // Rendered in the work folder, then moved: "+faststart" briefly needs twice the file size.
     const rendered = path.join(work, "final.mp4");
     await ffmpeg(

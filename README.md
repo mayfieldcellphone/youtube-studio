@@ -94,6 +94,14 @@ Dramatised scenes where people from the story speak in their own voices, while t
 
 Character lines use ElevenLabs Eleven v3, which acts the cue (`[whispering]`, `[afraid]`); if the account can't use v3 the line is read without the cue. A label with no voice in the cast is read by the narrator, with a note. While a character speaks the video shows a small **DRAMATISATION** label, and on upload the video is marked as altered/synthetic content and the description ends with "Contains dramatised scenes with AI voices."
 
+### Cinematic narration, screenplay scripts and sound design
+
+- **Narration** is spoken sentence by sentence (neighbouring text sent as context), trimmed to the speech, joined with 150-350 ms natural gaps, and mastered to -16 LUFS. Three presets (documentary narration, dramatic reveal, fast Short) are tuned on the Setup page (box 2b+) with a "Save and hear it" button that shows words/min and LUFS. The starting values are untuned: listen and adjust.
+- **Models**: `ELEVENLABS_MODEL` (default `eleven_v4`, falling back to `eleven_v3`, then `eleven_multilingual_v2`), optional `ELEVENLABS_SHORT_MODEL`. `ELEVENLABS_DIALOGUE=off` turns off multi-speaker dialogue requests (lines are then spoken one at a time).
+- **Screenplay scripts**: one event per line: `[NARRATOR] text`, `[HOUDINI | tired, whispering] text`, `[SFX: train whistle]`, `[AMBIENCE: rain on a tin roof]`, `[MUSIC: low strings]` (`out` mutes, `swell` lifts), `[PAUSE: 600ms]`, `[CHAPTER: title]` (stinger). Character lines are dramatised unless tagged `[SOURCE: letter, 1924]`. The older `NAME: [cue] text` form still works. Videos with characters get the on-screen DRAMATISATION label, a description note and YouTube's altered/synthetic flag.
+- **Film finish** (Edit channel): sepia or desaturated grade, 2.39:1 letterbox, film grain. Character speech is shown in a colour per speaker.
+- **Compare old and new narration**: `npm run voice:bench -- --video <id>` (needs your ElevenLabs key; about 3,000 characters per run), or `-- --mock` to test the tool without a key.
+
 ### AI pictures (optional, Edit channel → Visuals)
 
 Instead of stock footage, the app can draw a picture for every shot with Gemini's image model, using the same Gemini key (billing required). Each picture shows what the narrator is saying at that moment, in the right era and place, and the video maker moves slowly across it. Roughly $0.04 per picture: about $0.70 for a Short and $4 for a 10-minute video. Pictures Gemini refuses use stock footage instead, with a note. Videos with AI pictures are marked as altered/synthetic content when uploaded.
