@@ -266,6 +266,21 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
             <option value="warm">Warm: friendly and golden (money, lifestyle)</option>
           </select>
         </Field>
+        <Field label="Film finish" hint="Optional cinema touches on top of the look. Letterbox adds 2.39:1 black bars to horizontal videos. Grain adds texture but makes the video file noticeably bigger.">
+          <div className="flex flex-wrap items-center gap-3">
+            <select value={form.grade ?? "none"} onChange={(e) => set("grade", e.target.value as Channel["grade"])}>
+              <option value="none">No extra grade</option>
+              <option value="sepia">Sepia (old photographs)</option>
+              <option value="desaturated">Desaturated (cold archive footage)</option>
+            </select>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={form.letterbox ?? false} onChange={(e) => set("letterbox", e.target.checked)} /> Letterbox 2.39:1
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={form.grain ?? false} onChange={(e) => set("grain", e.target.checked)} /> Film grain
+            </label>
+          </div>
+        </Field>
         <Field
           label="Visuals"
           hint="What fills the screen while the narrator speaks. AI pictures show the actual story (the right era, place and people), which stock footage can't. Uses your Gemini key with billing. If a picture fails, stock footage is used for it."

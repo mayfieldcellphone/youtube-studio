@@ -18,6 +18,9 @@ export interface Channel {
   voiceStyle?: string;
   affiliateLinks?: string;
   look?: "cinematic" | "clean" | "warm";
+  grade?: "none" | "sepia" | "desaturated";
+  grain?: boolean;
+  letterbox?: boolean;
   visuals?: "stock" | "pictures";
   pictureStyle?: string;
   aiFootage?: "off" | "hook" | "key" | "all";

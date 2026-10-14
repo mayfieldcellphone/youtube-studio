@@ -358,7 +358,9 @@ Write the script as a screenplay, one event per line:
 [NARRATOR] The documentary voice: facts, context, transitions. Most lines are this.
 [SPEAKER | emotion] A character speaking in their own voice, e.g. [HOUDINI | tired, whispering] I can still feel the blow.
 [SFX: train whistle] A sound effect, on its own line, only where it adds atmosphere.
-[MUSIC: low strings, tense] A change in the music's mood, on its own line, rarely.
+[MUSIC: low strings, tense] A change in the music, on its own line, rarely. Use "out" or "silence" to drop the music completely until the next [MUSIC] line, and "swell" to lift it for a climax.
+[AMBIENCE: rain on a tin roof] A quiet looping sound bed for the location, placed where the scene changes place. It plays until the next [AMBIENCE] line.
+[CHAPTER: The Hospital] Between the chapters of a long video: plays a short stinger. Skip it in Shorts.
 [PAUSE: 600ms] A deliberate silence before the next line (200-1500 ms), used for dread, a reveal or after a shock.
 Visual directions go on their own line in [square brackets] with no label or colon, e.g. [slow push-in on the empty tent]; they are not spoken.
 
@@ -509,7 +511,7 @@ export interface Scene {
 }
 
 export interface SceneCue {
-  kind: "sfx" | "music" | "pause";
+  kind: "sfx" | "music" | "ambience" | "chapter" | "pause";
   text?: string;
   ms?: number;
 }
@@ -580,10 +582,17 @@ async function planPart(channel: Channel, video: Video, parts: string[], index: 
       ? `Script:\n${parts[0]}`
       : `The whole script, for context only (keep people, places and era consistent with it):\n${video.script}\n\n` +
         `Only turn THIS PART (part ${index + 1} of ${parts.length}) into scenes:\n${parts[index]}`;
+  // Recurring characters keep one look: the same description is repeated in every picture they appear in.
+  const looks = allCast(channel, video).filter((c) => c.appearance);
+  const castLooks = looks.length
+    ? `\nCHARACTER LOOKS (when a shot shows one of these people, repeat their description word for word inside "picture" and "aiPrompt", in the same clothes and era, so they look like the same person in every shot):\n${looks
+        .map((c) => `- ${speakerKey(c.name)}: ${c.appearance}`)
+        .join("\n")}\nFor lines spoken by a character, prefer over-the-shoulder shots, silhouettes, hands and objects, or a reaction cutaway over a straight-on face, unless the scene is a close-up of that character.\n`
+    : "";
   const prompt = `${channelBrief(channel)}
 
 ${script}
-
+${castLooks}
 Turn this script into scenes for an automatically edited ${video.format === "short" ? "vertical YouTube Short" : "horizontal YouTube video"}.
 - "narration": the exact words spoken in this scene, copied from the script in order. Remove visual directions in [square brackets] and any speaker labels. Together, the scenes must contain the whole spoken script.
 - "speaker": who speaks the scene. A script line that starts with a capitalised label and a colon ("JOAN: I deny it.") is spoken by that character: give it its own scene with "speaker" set to the label exactly as written ("JOAN"). Every other line is "${NARRATOR}". Never put two speakers in one scene.

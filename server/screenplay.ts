@@ -21,10 +21,12 @@ export type ScreenplayEvent =
   | { kind: "speech"; speaker: string; emotion: string; text: string; dramatized: boolean; source?: string }
   | { kind: "sfx"; text: string }
   | { kind: "music"; text: string }
+  | { kind: "ambience"; text: string }
+  | { kind: "chapter"; text: string }
   | { kind: "pause"; ms: number }
   | { kind: "direction"; text: string };
 
-const RESERVED = new Set(["SFX", "MUSIC", "PAUSE", "DRAMATIZED", "DRAMATISED", "SOURCE"]);
+const RESERVED = new Set(["SFX", "MUSIC", "PAUSE", "AMBIENCE", "AMBIENT", "CHAPTER", "DRAMATIZED", "DRAMATISED", "SOURCE"]);
 /** "[HOUDINI | tired]" or "[BESS]": a speaker label in capitals with an optional emotion. */
 const SPEAKER_TAG = /^\[\s*([A-Z][A-Z0-9 .'’-]{0,39}?)\s*(?:\|\s*([^\]]{1,60}))?\]\s*/;
 const LEGACY_LABEL = /^\s*([A-Z][A-Z .'’-]{0,39}):\s*/;
@@ -64,7 +66,7 @@ export function parseScreenplayLine(raw: string): ScreenplayEvent | null {
   line = lead.text;
   if (!line) return null;
 
-  const directive = /^\[\s*(SFX|MUSIC|PAUSE)\s*:\s*([^\]]*)\]\s*$/i.exec(line);
+  const directive = /^\[\s*(SFX|MUSIC|PAUSE|AMBIENCE|AMBIENT|CHAPTER)\s*:\s*([^\]]*)\]\s*$/i.exec(line);
   if (directive) {
     const kind = directive[1].toUpperCase();
     if (kind === "PAUSE") {
@@ -73,7 +75,10 @@ export function parseScreenplayLine(raw: string): ScreenplayEvent | null {
     }
     const text = directive[2].trim();
     if (!text) return null;
-    return kind === "SFX" ? { kind: "sfx", text } : { kind: "music", text };
+    if (kind === "SFX") return { kind: "sfx", text };
+    if (kind === "MUSIC") return { kind: "music", text };
+    if (kind === "CHAPTER") return { kind: "chapter", text };
+    return { kind: "ambience", text };
   }
 
   const tag = SPEAKER_TAG.exec(line);
@@ -152,7 +157,7 @@ export function dialogueShare(events: ScreenplayEvent[]): number {
 
 /** Cues that sit between spoken lines, anchored to the line that follows them. */
 export interface Cue {
-  kind: "sfx" | "music" | "pause";
+  kind: "sfx" | "music" | "ambience" | "chapter" | "pause";
   text?: string;
   ms?: number;
   /** First words of the spoken line this cue comes before; empty when it trails the script */
@@ -182,7 +187,7 @@ export function prepareScript(script: string): PreparedScript {
   const pending: Omit<Cue, "before">[] = [];
   let dramatizedLines = 0;
   for (const e of events) {
-    if (e.kind === "sfx" || e.kind === "music") pending.push({ kind: e.kind, text: e.text });
+    if (e.kind === "sfx" || e.kind === "music" || e.kind === "ambience" || e.kind === "chapter") pending.push({ kind: e.kind, text: e.text });
     else if (e.kind === "pause") pending.push({ kind: "pause", ms: e.ms });
     else if (e.kind === "direction") lines.push(`[${e.text}]`);
     else {

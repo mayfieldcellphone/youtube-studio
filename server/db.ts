@@ -46,6 +46,12 @@ export interface Channel {
   affiliateLinks?: string;
   /** Color grade for automatically made videos */
   look?: VideoLook;
+  /** Extra colour grade on top of the look */
+  grade?: "none" | "sepia" | "desaturated";
+  /** Light film grain (bigger files) */
+  grain?: boolean;
+  /** 2.39:1 letterbox bars on horizontal videos */
+  letterbox?: boolean;
   /** Stock footage, or an AI picture drawn for every shot */
   visuals?: "stock" | "pictures";
   /** How AI pictures should look; empty uses a style that fits the look */

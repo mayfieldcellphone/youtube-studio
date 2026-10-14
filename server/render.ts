@@ -3,9 +3,11 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 import ffmpegPath from "ffmpeg-static";
-import { db, UPLOAD_DIR, WORK_DIR, type VideoLook } from "./db";
+import { DATA_DIR, db, UPLOAD_DIR, WORK_DIR, type VideoLook } from "./db";
 import { planScenes } from "./ai";
 import { download, findFootage, voiceConfigured, type Footage, type Word } from "./media";
+import { finishingFilters } from "./finishing";
+import { AMBIENCE_GAIN_DB, duckFilter, generateSound, makeStinger, mixBed, musicGainExpression, SFX_GAIN_DB, STINGER_GAIN_DB, timedCues, type BedItem, type TimedCue } from "./soundDesign";
 import { synthesizeScenes, voiceFor, type CharacterLine } from "./voices";
 import { masterVoice } from "./audioPost";
 import { resolvePresets } from "./voicePresets";
@@ -234,7 +236,7 @@ async function render(videoId: string) {
     }
 
     // 4. Edit each shot: crop to fit, slow camera movement, color grade.
-    const look = LOOKS[channel.look ?? "clean"];
+    const look = [LOOKS[channel.look ?? "clean"], ...finishingFilters(channel, W, H)].join(",");
     const segments: string[] = [];
     for (const [i, shot] of shots.entries()) {
       stage(`Editing shots (${i + 1}/${shots.length})`, 55 + (25 * i) / shots.length);
@@ -289,12 +291,28 @@ async function render(videoId: string) {
 
     const music = channel.musicFile && fs.existsSync(channel.musicFile.path) ? channel.musicFile.path : null;
     const fadeOut = Math.max(0, total - 2.5).toFixed(2);
+
+    // Sound effects, ambience beds and chapter stingers from the screenplay's cues.
+    let at = 0;
+    const sceneStarts = voices.map((v) => {
+      const start = at;
+      at += v.duration;
+      return start;
+    });
+    const cues = timedCues(scenes, sceneStarts);
+    const bed = await buildEffectBed(cues, total, work, notes);
+    const musicGain = musicGainExpression(cues);
+
     const audioGraph = music
-      ? // Music sits quietly under the voice and ducks further whenever the narrator speaks.
-        `[2:a]aresample=44100,volume=0.25,afade=t=in:d=1.5,afade=t=out:st=${fadeOut}:d=2.5[m];` +
-        `[1:a]asplit=2[n1][n2];[m][n1]sidechaincompress=threshold=0.02:ratio=10:attack=15:release=400[duck];` +
-        `[n2][duck]amix=inputs=2:duration=first:normalize=0[a]`
-      : `[1:a]anull[a]`;
+      ? // Music sits under the voice, ducks about 14 dB whenever someone speaks, and follows [MUSIC] cues.
+        `[2:a]aresample=44100,volume=0.3${musicGain ? `,volume='${musicGain}':eval=frame` : ""},afade=t=in:d=1.5,afade=t=out:st=${fadeOut}:d=2.5[m];` +
+        `[1:a]asplit=2[n1][n2];[m][n1]${duckFilter()}[duck];` +
+        (bed
+          ? `[n2][duck][3:a]amix=inputs=3:duration=first:normalize=0[a]`
+          : `[n2][duck]amix=inputs=2:duration=first:normalize=0[a]`)
+      : bed
+        ? `[1:a][2:a]amix=inputs=2:duration=first:normalize=0[a]`
+        : `[1:a]anull[a]`;
     // Rendered in the work folder, then moved: "+faststart" briefly needs twice the file size.
     const rendered = path.join(work, "final.mp4");
     await ffmpeg(
@@ -302,6 +320,7 @@ async function render(videoId: string) {
         "-f", "concat", "-safe", "0", "-i", "shots.txt",
         "-i", "voice-master.wav",
         ...(music ? ["-stream_loop", "-1", "-i", music] : []),
+        ...(bed ? ["-i", path.basename(bed)] : []),
         "-filter_complex", `[0:v]ass=captions.ass:fontsdir=fonts[v];${audioGraph}`,
         "-map", "[v]", "-map", "[a]",
         "-t", total.toFixed(3),
@@ -421,6 +440,13 @@ function shotArgs(
 
 const GOLD = "&H004AB8E8&";
 const WHITE = "&H00FFFFFF&";
+/** Caption colours for characters, in order of first appearance (ASS colours are BGR). */
+const SPEAKER_COLORS = ["&H006B7AFF&", "&H00FFC46B&", "&H00A0E07C&", "&H00FF9BC7&", "&H00C78FFF&", "&H0066D9FF&"];
+export const speakerColors = (speakers: (string | undefined)[]) => {
+  const map = new Map<string, string>();
+  for (const s of speakers) if (s && !map.has(s)) map.set(s, SPEAKER_COLORS[map.size % SPEAKER_COLORS.length]);
+  return map;
+};
 
 /**
  * Word-timed captions. Shorts: 3 big words at a time with the spoken word in gold and a small
@@ -445,9 +471,10 @@ export function buildCaptions(
   };
   const lines: string[] = [];
   let offset = 0;
+  const colors = speakerColors(voices.map((v) => v.speaker));
   // A small "DRAMATISATION" label in the top corner while a character speaks.
   const label = (start: number, end: number, speaker: string) =>
-    `Dialogue: 1,${assTime(start)},${assTime(end)},Label,,0,0,0,,${speaker.replace(/[{}\\]/g, "").toUpperCase()} · DRAMATISATION`;
+    `Dialogue: 1,${assTime(start)},${assTime(end)},Label,,0,0,0,,{\\c${colors.get(speaker) ?? WHITE}}${speaker.replace(/[{}\\]/g, "").toUpperCase()}{\\c${WHITE}} · DRAMATISATION`;
   for (const [scene, voice] of voices.entries()) {
     if (voice.speaker && voices[scene - 1]?.speaker !== voice.speaker) {
       // One label per run of lines by the same character.
@@ -465,7 +492,8 @@ export function buildCaptions(
       const slotEnd = offset + voice.duration - (voices[scene + 1]?.overlap ?? 0);
       const chunkEnd = Math.max(base + chunk[0].start + 0.1, Math.min(base + (next ? next.start : chunk[chunk.length - 1].end + 0.25), next ? Infinity : slotEnd));
       if (!portrait) {
-        const text = chunk.map((w) => clean(w.text)).join(" ");
+        const tint = voice.speaker ? `{\\c${colors.get(voice.speaker) ?? WHITE}}` : "";
+        const text = tint + chunk.map((w) => clean(w.text)).join(" ");
         lines.push(`Dialogue: 0,${assTime(base + chunk[0].start)},${assTime(chunkEnd)},Default,,0,0,0,,${text}`);
         continue;
       }
@@ -473,7 +501,7 @@ export function buildCaptions(
         const start = base + word.start;
         const end = j + 1 < chunk.length ? base + chunk[j + 1].start : chunkEnd;
         const text = chunk
-          .map((w, k) => (k === j ? `{\\c${GOLD}}${clean(w.text)}{\\c${WHITE}}` : clean(w.text)))
+          .map((w, k) => (k === j ? `{\\c${(voice.speaker && colors.get(voice.speaker)) || GOLD}}${clean(w.text)}{\\c${WHITE}}` : clean(w.text)))
           .join(" ");
         const pop = j === 0 ? "{\\fscx112\\fscy112\\t(0,120,\\fscx100\\fscy100)}" : "";
         lines.push(`Dialogue: 0,${assTime(start)},${assTime(end)},Default,,0,0,0,,${pop}${text}`);
@@ -521,6 +549,42 @@ function moveFile(from: string, to: string) {
 
 // Encoder statistics and progress lines FFmpeg prints on every run; they hide the real error.
 const FFMPEG_NOISE = /^\[(libx264|aac) @|^(frame|size)=|^\s*$|^video:\d/;
+
+/**
+ * Builds the track of sound effects, ambience and stingers from the screenplay's cues, or
+ * returns null when there are none. An effect that can't be made is skipped with a note.
+ */
+async function buildEffectBed(cues: TimedCue[], total: number, work: string, notes: string[]): Promise<string | null> {
+  const items: BedItem[] = [];
+  const cacheDir = path.join(DATA_DIR, "sound-cache");
+  const skipped = new Set<string>();
+  const sfx = cues.filter((c) => c.kind === "sfx");
+  const beds = cues.filter((c) => c.kind === "ambience").sort((a, b) => a.start - b.start);
+  const chapters = cues.filter((c) => c.kind === "chapter");
+
+  for (const cue of sfx) {
+    const file = await generateSound(cue.text, 3, cacheDir, "sfx");
+    if (file) items.push({ file, start: cue.start, gainDb: SFX_GAIN_DB });
+    else skipped.add(cue.text);
+  }
+  for (const [k, cue] of beds.entries()) {
+    if (/\b(off|none|silence|stop|end)\b/i.test(cue.text)) continue;
+    const end = beds[k + 1]?.start ?? total;
+    if (end - cue.start < 1.5) continue;
+    const file = await generateSound(cue.text, 20, cacheDir, "ambience");
+    if (file) items.push({ file, start: cue.start, gainDb: AMBIENCE_GAIN_DB, loopFor: end - cue.start });
+    else skipped.add(cue.text);
+  }
+  if (chapters.length) {
+    const stinger = await makeStinger(path.join(work, "stinger.wav"));
+    for (const cue of chapters) items.push({ file: stinger, start: cue.start, gainDb: STINGER_GAIN_DB });
+  }
+  if (skipped.size) notes.push(`These sound effects couldn't be made, so they were left out: ${[...skipped].join("; ")}.`);
+  if (!items.length) return null;
+  const out = path.join(work, "fx-bed.wav");
+  await mixBed(items, total, out);
+  return out;
+}
 
 function ffmpeg(args: string[], onProgress?: (seconds: number) => void, cwd?: string) {
   return new Promise<void>((resolve, reject) => {
