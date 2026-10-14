@@ -18,6 +18,7 @@ import { privacyPage, termsPage } from "./legal";
 import { hedraConfigured } from "./hedra";
 import { ensurePortrait, portraitFile } from "./portraits";
 import { speakerKey } from "./speakers";
+import { DEFAULT_PRESETS, PRESET_IDS, resolvePresets } from "./voicePresets";
 import { appUrl, describeSettings, keyProblems, loadSettings, saveSettings, SETTING_KEYS, wrongBox, type SettingKey } from "./settings";
 
 loadSettings();
@@ -528,12 +529,49 @@ app.get("/api/voices", async (req, res) => {
 });
 
 app.post("/api/voices/preview", async (req, res) => {
-  const voice = z
-    .object({ engine: engineParam, voiceId: z.string().max(100).optional(), style: z.string().max(300).optional() })
+  const body = z
+    .object({
+      engine: engineParam,
+      voiceId: z.string().max(100).optional(),
+      style: z.string().max(300).optional(),
+      preset: z.enum(PRESET_IDS).optional(),
+    })
     .parse(req.body);
+  const voice = { engine: body.engine, voiceId: body.voiceId, style: body.style };
   if (!engineReady(voice.engine)) throw new HttpError(400, "Add this voice engine's key on the Setup page first.");
-  const file = await previewVoice(voice, path.join(WORK_DIR, "previews"));
-  res.sendFile(file, () => fs.rm(file, { force: true }, () => {}));
+  if (!ffmpegAvailable()) throw new HttpError(500, "FFmpeg is missing. Run npm install again.");
+  // About 20 seconds, made with the same steps as a real video, so what you hear is what you get.
+  const preview = await previewVoice(voice, path.join(WORK_DIR, "previews"), body.preset);
+  res.set({
+    "X-Preview-Duration": preview.duration.toFixed(1),
+    "X-Preview-WPM": String(preview.wpm),
+    "X-Preview-LUFS": preview.lufs.toFixed(1),
+    "X-Preview-Preset": preview.preset,
+  });
+  res.sendFile(preview.file, () => fs.rm(preview.file, { force: true }, () => {}));
+});
+
+// Voice presets: how fast and how expressive each kind of scene is read. Saved values override the defaults.
+const presetValues = z
+  .object({
+    stability: z.number().min(0).max(1),
+    similarity: z.number().min(0).max(1),
+    style: z.number().min(0).max(1),
+    speed: z.number().min(0.7).max(1.2),
+    gapMs: z.tuple([z.number().min(0).max(2000), z.number().min(0).max(3000)]),
+    tempo: z.number().min(1).max(1.08),
+  })
+  .partial();
+const presetsInput = z.object(Object.fromEntries(PRESET_IDS.map((id) => [id, presetValues.optional()])) as Record<(typeof PRESET_IDS)[number], z.ZodOptional<typeof presetValues>>);
+
+app.get("/api/voice/presets", (_req, res) => {
+  res.json({ presets: resolvePresets(db.voicePresets()), defaults: DEFAULT_PRESETS });
+});
+
+/** Send {} to go back to the defaults. */
+app.put("/api/voice/presets", (req, res) => {
+  db.setVoicePresets(presetsInput.parse(req.body));
+  res.json({ presets: resolvePresets(db.voicePresets()), defaults: DEFAULT_PRESETS });
 });
 
 app.get("/api/voice/usage", async (_req, res) => {

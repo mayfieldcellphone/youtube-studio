@@ -188,15 +188,30 @@ export const api = {
   research: (id: string) => request<Video>("POST", `/api/videos/${id}/research`),
   render: (id: string) => request<Video>("POST", `/api/videos/${id}/render`),
   voices: (engine: VoiceEngine) => request<Voice[]>("GET", `/api/voices?engine=${engine}`),
-  previewVoice: async (choice: { engine: VoiceEngine; voiceId?: string; style?: string }) => {
+  previewVoiceDetailed: async (choice: { engine: VoiceEngine; voiceId?: string; style?: string; preset?: PresetId }): Promise<VoicePreview> => {
     const res = await fetch("/api/voices/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(choice),
     });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Preview failed.");
-    return URL.createObjectURL(await res.blob());
+    const num = (h: string) => {
+      const v = Number(res.headers.get(h));
+      return Number.isFinite(v) && res.headers.get(h) !== null ? v : undefined;
+    };
+    return {
+      url: URL.createObjectURL(await res.blob()),
+      duration: num("X-Preview-Duration"),
+      wpm: num("X-Preview-WPM"),
+      lufs: num("X-Preview-LUFS"),
+      preset: (res.headers.get("X-Preview-Preset") as PresetId | null) ?? undefined,
+    };
   },
+  previewVoice: async (choice: { engine: VoiceEngine; voiceId?: string; style?: string; preset?: PresetId }) =>
+    (await api.previewVoiceDetailed(choice)).url,
+  voicePresets: () => request<{ presets: Record<PresetId, VoicePreset>; defaults: Record<PresetId, VoicePreset> }>("GET", "/api/voice/presets"),
+  saveVoicePresets: (presets: Partial<Record<PresetId, Partial<VoicePreset>>>) =>
+    request<{ presets: Record<PresetId, VoicePreset>; defaults: Record<PresetId, VoicePreset> }>("PUT", "/api/voice/presets", presets),
   voiceUsage: () => request<{ used: number; limit: number; resetsAt?: string } | null>("GET", "/api/voice/usage"),
   videoUrl: (v: Video) => `/api/videos/${v.id}/video?t=${encodeURIComponent(v.updatedAt)}`,
   generateScript: (id: string) => request<Video>("POST", `/api/videos/${id}/script`),
@@ -316,3 +331,24 @@ export const compact = (n: number) => new Intl.NumberFormat(undefined, { notatio
 
 export const fileSize = (bytes: number) =>
   bytes > 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+
+export type PresetId = "documentary_narration" | "dramatic_reveal" | "fast_short";
+
+export interface VoicePreset {
+  label: string;
+  description: string;
+  stability: number;
+  similarity: number;
+  style: number;
+  speed: number;
+  gapMs: [number, number];
+  tempo: number;
+}
+
+export interface VoicePreview {
+  url: string;
+  duration?: number;
+  wpm?: number;
+  lufs?: number;
+  preset?: PresetId;
+}

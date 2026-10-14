@@ -7,6 +7,8 @@ import { db, UPLOAD_DIR, WORK_DIR, type VideoLook } from "./db";
 import { planScenes } from "./ai";
 import { download, findFootage, voiceConfigured, type Footage, type Word } from "./media";
 import { synthesizeScenes, voiceFor, type CharacterLine } from "./voices";
+import { masterVoice } from "./audioPost";
+import { resolvePresets } from "./voicePresets";
 import { castVoice, NARRATOR } from "./speakers";
 import { hedraConfigured, talkingClip } from "./hedra";
 import { ensurePortrait } from "./portraits";
@@ -15,7 +17,7 @@ import { DEFAULT_PICTURE_STYLES, makePictures } from "./images";
 
 const FONT_DIR = path.resolve("assets/fonts");
 const FPS = 30;
-/** Silence after each scene so sentences don't run into each other. */
+/** Silence after a scene when its voice engine didn't set a natural gap (characters, for now). */
 const GAP = 0.25;
 
 export const ffmpegAvailable = () => Boolean(ffmpegPath && fs.existsSync(ffmpegPath));
@@ -101,8 +103,14 @@ async function render(videoId: string) {
       path.join(work, "voice"),
       (done, total) => stage(`Recording voiceover (${done + 1}/${total})`, 6 + (29 * done) / total),
       characters,
+      {
+        format: video.format,
+        presets: resolvePresets(db.voicePresets()),
+        // Key moments of long videos are read with the slower, more dramatic preset.
+        keyMoments: scenes.map((s) => Boolean(s.keyMoment)),
+      },
     );
-    const voices = narrated.map((v) => ({ ...v, duration: Math.max(v.duration, 0.5) + GAP }));
+    const voices = narrated.map((v) => ({ ...v, duration: Math.max(v.duration, 0.5) + (v.gapAfter ?? GAP) }));
 
     // 1b. Characters appear while they speak: their painted portrait, lip-synced to their line
     //     by Hedra when it's set up, otherwise the portrait with a slow push-in.
@@ -247,6 +255,12 @@ async function render(videoId: string) {
       fs.writeFileSync(path.join(work, name), files.map((f) => `file '${path.basename(f)}'`).join("\n"));
     writeList("shots.txt", segments);
     writeList("voice.txt", voiceParts);
+    // One continuous voice track, then high-pass, light compression and loudness to -16 LUFS so
+    // every voice and engine sits at the same level before the music goes under it.
+    stage("Mastering the voice", 81);
+    await ffmpeg(["-f", "concat", "-safe", "0", "-i", "voice.txt", "-c", "copy", "voice-all.wav"], undefined, work);
+    const mastered = await masterVoice(path.join(work, "voice-all.wav"), path.join(work, "voice-master.wav"));
+    console.log(`Voice loudness for ${video.id}: ${mastered.before.input_i.toFixed(1)} LUFS before, ${mastered.after.input_i.toFixed(1)} LUFS after mastering.`);
     fs.mkdirSync(path.join(work, "fonts"));
     for (const font of fs.readdirSync(FONT_DIR).filter((f) => /\.(ttf|otf)$/i.test(f))) {
       fs.copyFileSync(path.join(FONT_DIR, font), path.join(work, "fonts", font));
@@ -269,7 +283,7 @@ async function render(videoId: string) {
     await ffmpeg(
       [
         "-f", "concat", "-safe", "0", "-i", "shots.txt",
-        "-f", "concat", "-safe", "0", "-i", "voice.txt",
+        "-i", "voice-master.wav",
         ...(music ? ["-stream_loop", "-1", "-i", music] : []),
         "-filter_complex", `[0:v]ass=captions.ass:fontsdir=fonts[v];${audioGraph}`,
         "-map", "[v]", "-map", "[a]",

@@ -2,6 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { DATA_DIR, type Channel } from "./db";
 import { DEFAULT_VOICE_ID, ELEVEN_ACTING_MODEL, elevenSpeak, listVoices as listElevenVoices, voiceConfigured as elevenConfigured, type Word } from "./media";
+import { narrateWithEleven, wordsPerMinute } from "./narration";
+import { audioDuration, joinWithGaps, masterVoice } from "./audioPost";
+import { DEFAULT_PRESETS, gapSeconds, modelChain, presetFor, resolvePresets, type PresetId, type VoicePreset } from "./voicePresets";
+import { db } from "./db";
 
 /**
  * Narration engines. Each channel picks one:
@@ -37,7 +41,7 @@ export function voiceFor(channel: Channel): VoiceChoice {
 
 export const DEFAULT_STYLES = {
   cinematic:
-    "You are a seasoned true-crime documentary narrator. Speak in a low, calm, intimate voice at a slow pace. Let tension build, pause briefly before reveals, and drop your voice slightly on ominous lines. Never sound cheerful",
+    "You are a seasoned true-crime documentary narrator. Speak in a low, intimate voice at a confident, steady pace that holds attention, a little faster than a slow read. Let tension build with short pauses before reveals, and drop your voice slightly on ominous lines. Never sound cheerful",
   warm: "You are a trusted friend who is good with money. Speak warmly and confidently at a relaxed pace, with a hint of a smile, emphasising the key numbers",
   clean: "You are an energetic but credible tech YouTuber. Speak clearly and briskly, with natural enthusiasm and emphasis on the most useful points",
 } as const;
@@ -71,7 +75,19 @@ export interface SceneAudio {
   file: string;
   words: Word[];
   duration: number;
+  /** Natural silence to leave after this scene, in seconds (the video maker falls back to a default) */
+  gapAfter?: number;
 }
+
+/** How narrator scenes are spoken: which voice preset each uses, and which models to try. */
+export interface NarrationOptions {
+  format: "short" | "long";
+  presets: Record<PresetId, VoicePreset>;
+  /** Scenes that are key moments; on long videos they use the dramatic_reveal preset */
+  keyMoments?: boolean[];
+}
+
+export const defaultNarration = (): NarrationOptions => ({ format: "long", presets: resolvePresets(db.voicePresets()) });
 
 /** A scene spoken by a character from the channel's cast instead of the narrator. */
 export interface CharacterLine {
@@ -96,8 +112,10 @@ export async function synthesizeScenes(
   outBase: string,
   onProgress: (done: number, total: number) => void,
   characters: (CharacterLine | undefined)[] = [],
+  narration: NarrationOptions = defaultNarration(),
 ): Promise<SceneAudio[]> {
   const results: SceneAudio[] = [];
+  const presetOf = (i: number) => narration.presets[presetFor({ keyMoment: narration.keyMoments?.[i] }, narration.format)];
 
   // Steps: each character scene on its own; narrator scenes one by one (ElevenLabs) or grouped.
   const steps: number[][] = [];
@@ -117,7 +135,27 @@ export async function synthesizeScenes(
       continue;
     }
     if (voice.engine === "elevenlabs") {
-      results[scenes[0]] = await synthesize(texts[scenes[0]], voice, `${outBase}-${scenes[0]}`);
+      const i = scenes[0];
+      const preset = presetOf(i);
+      // The narration either side of this scene gives its first and last sentences some context.
+      const before = i > 0 && !characters[i - 1] ? texts[i - 1] : undefined;
+      const after = i < texts.length - 1 && !characters[i + 1] ? texts[i + 1] : undefined;
+      const spoken = await narrateWithEleven({
+        text: texts[i],
+        voiceId: voice.voiceId || DEFAULT_VOICE_ID,
+        outBase: `${outBase}-${i}`,
+        preset,
+        models: modelChain(process.env, narration.format),
+        before,
+        after,
+        gapSeed: i * 8,
+      });
+      results[i] = {
+        file: spoken.file,
+        duration: spoken.duration,
+        words: spoken.words.length ? spoken.words : estimateWords(texts[i], spoken.duration),
+        gapAfter: gapSeconds(preset, i * 8 + 7),
+      };
       continue;
     }
     const text = scenes.map((i) => texts[i]).join(" ");
@@ -129,7 +167,7 @@ export async function synthesizeScenes(
       const file = `${outBase}-${i}.wav`;
       writeWav(file, part, raw.rate);
       const duration = part.length / raw.rate;
-      results[i] = { file, words: estimateWords(texts[i], duration), duration };
+      results[i] = { file, words: estimateWords(texts[i], duration), duration, gapAfter: gapSeconds(presetOf(i), i * 8 + 7) };
     }
   }
   return results;
@@ -412,11 +450,43 @@ export function estimateWords(text: string, duration: number): Word[] {
   });
 }
 
-/** A short sample in the chosen voice for the "Preview" button. */
-export async function previewVoice(voice: VoiceChoice, dir: string) {
-  const text =
-    "In the winter of 1959, nine hikers vanished in the mountains. What they left behind has puzzled investigators ever since.";
+/** About 20 seconds at documentary pace. Three scenes, like a real script. */
+export const PREVIEW_SCENES = [
+  "In the winter of 1959, nine hikers vanished in the mountains. What they left behind has puzzled investigators ever since.",
+  "A tent, cut open from the inside. Boots left in the snow. And a final photograph that nobody can fully explain.",
+  "Tonight, we follow their footsteps, one at a time. Stay with me.",
+];
+
+export interface VoicePreview {
+  file: string;
+  /** Seconds */
+  duration: number;
+  wpm: number;
+  /** Integrated loudness after mastering */
+  lufs: number;
+  preset: PresetId;
+}
+
+/**
+ * A ~20 second sample for the "Preview" button, made with the same steps as a real video:
+ * sentence chunks, natural gaps and voice mastering. `presetId` picks which preset to hear.
+ */
+export async function previewVoice(voice: VoiceChoice, dir: string, presetId: PresetId = "documentary_narration"): Promise<VoicePreview> {
   fs.mkdirSync(dir, { recursive: true });
-  const { file } = await synthesize(text, voice, path.join(dir, `preview-${Date.now()}`));
-  return file;
+  const presets = resolvePresets(db.voicePresets());
+  const chosen = presets[presetId] ?? DEFAULT_PRESETS.documentary_narration;
+  // Every kind of scene uses the chosen preset, so the sample is exactly what it will sound like.
+  const narration: NarrationOptions = {
+    format: "long",
+    presets: { documentary_narration: chosen, dramatic_reveal: chosen, fast_short: chosen },
+  };
+  const base = path.join(dir, `preview-${Date.now()}`);
+  const scenes = await synthesizeScenes(PREVIEW_SCENES, voice, base, () => {}, [], narration);
+  const joined = `${base}-joined.wav`;
+  await joinWithGaps(scenes.map((s) => s.file), scenes.map((s) => s.gapAfter ?? 0.25), joined);
+  const file = `${base}.wav`;
+  const { after } = await masterVoice(joined, file);
+  const duration = await audioDuration(file);
+  for (const f of [joined, ...scenes.map((s) => s.file)]) fs.rmSync(f, { force: true });
+  return { file, duration, wpm: wordsPerMinute(PREVIEW_SCENES.join(" "), duration), lufs: after.input_i, preset: presetId };
 }

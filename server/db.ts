@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import type { PresetId, VoicePreset } from "./voicePresets";
 
 export const DATA_DIR = path.resolve(process.env.DATA_DIR ?? "data");
 export const UPLOAD_DIR = path.join(DATA_DIR, "uploads");
@@ -147,9 +148,13 @@ export interface Video {
   updatedAt: string;
 }
 
+/** Voice preset values the user saved; anything missing falls back to the defaults (see voicePresets.ts). */
+export type SavedPresets = Partial<Record<PresetId, Partial<VoicePreset>>>;
+
 interface Data {
   channels: Channel[];
   videos: Video[];
+  voicePresets?: SavedPresets;
 }
 
 function load(): Data {
@@ -174,6 +179,12 @@ export const newId = () => crypto.randomUUID();
 const now = () => new Date().toISOString();
 
 export const db = {
+  voicePresets: () => data.voicePresets ?? {},
+  setVoicePresets(presets: SavedPresets) {
+    data.voicePresets = presets;
+    save();
+  },
+
   channels: () => data.channels,
   channel: (id: string) => data.channels.find((c) => c.id === id),
 

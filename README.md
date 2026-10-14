@@ -70,6 +70,7 @@ Create a key at [console.anthropic.com](https://console.anthropic.com) and set `
 - **Kokoro**: free and unlimited, runs on your computer (open-source model, English). No key needed. The first use downloads the model (about 90 MB) into `data/models`.
 - **Gemini**: very natural, and follows a narration style you describe. Create a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) and set `GEMINI_API_KEY`. The free tier allows only a few voice requests per day; turn on billing for regular use.
 - **ElevenLabs**: the most human voice, paid by monthly characters. Create a key at [elevenlabs.io](https://elevenlabs.io) (profile → API Keys, allow Text to Speech, Voices read and write, User read, and Text to Voice if listed, which character voices need) and set `ELEVENLABS_API_KEY`.
+  Narration is spoken sentence by sentence with neighbouring text as context, trimmed to the speech, joined with short natural gaps and mastered to -16 LUFS. Tune pace and expressiveness with the three presets on the Setup page (box 2b+). `ELEVENLABS_MODEL` (default `eleven_v4`, falling back to `eleven_v3`, then `eleven_multilingual_v2`) and `ELEVENLABS_SHORT_MODEL` choose the models.
 
 ElevenLabs returns exact word timings for captions. For Kokoro and Gemini the app estimates them from the text, which stays close because scenes are 1-2 sentences.
 

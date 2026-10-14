@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { isAudioTag } from "./speakers";
+import { MAX_SETTINGS_LEVEL, settingsFor, type VoicePreset } from "./voicePresets";
 
 // ---------- ElevenLabs (voiceover) ----------
 
@@ -11,12 +12,26 @@ const ELEVEN_MODEL = "eleven_multilingual_v2";
 
 export const voiceConfigured = () => Boolean(process.env.ELEVENLABS_API_KEY);
 
+/** An ElevenLabs failure with the HTTP status and raw body kept, so callers can tell a rejected setting from a missing model. */
+export class ElevenError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly body: string,
+  ) {
+    super(message);
+  }
+}
+
 async function eleven(path: string, init?: RequestInit) {
   const res = await fetch(`https://api.elevenlabs.io${path}`, {
     ...init,
     headers: { "xi-api-key": process.env.ELEVENLABS_API_KEY ?? "", "Content-Type": "application/json", ...init?.headers },
   });
-  if (!res.ok) throw new Error(elevenError(res.status, await res.text()));
+  if (!res.ok) {
+    const body = await res.text();
+    throw new ElevenError(elevenError(res.status, body), res.status, body);
+  }
   return res.json();
 }
 
@@ -166,7 +181,22 @@ export async function elevenSpeak(text: string, voiceId: string, outFile: string
   });
   fs.writeFileSync(outFile, Buffer.from(data.audio_base64, "base64"));
 
-  const a = data.alignment ?? data.normalized_alignment;
+  const words = wordsFromAlignment(data.alignment ?? data.normalized_alignment);
+  const duration = words.length ? words[words.length - 1].end : 0;
+  return { words, duration };
+}
+
+export interface Alignment {
+  characters: string[];
+  character_start_times_seconds: number[];
+  character_end_times_seconds: number[];
+}
+
+/**
+ * Turns ElevenLabs' per-character timings into words. Audio tags like [firm] steer the
+ * delivery but aren't spoken, so they are kept out of the words (and so out of captions).
+ */
+export function wordsFromAlignment(a: Alignment | null | undefined): Word[] {
   const words: Word[] = [];
   let current: Word | null = null;
   a?.characters?.forEach((ch: string, i: number) => {
@@ -181,9 +211,106 @@ export async function elevenSpeak(text: string, voiceId: string, outFile: string
     }
   });
   if (current) words.push(current);
-  const duration = words.length ? words[words.length - 1].end : 0;
-  // Audio tags like [firm] steer the delivery but aren't spoken, so keep them out of captions.
-  return { words: words.filter((w) => !isAudioTag(w.text)), duration };
+  return words.filter((w) => !isAudioTag(w.text));
+}
+
+// ---------- Narration chunks: presets, model fallback, context ----------
+
+export interface ChunkSpeech {
+  words: Word[];
+  /** Seconds into the raw file where the first spoken word starts (undefined if no timings came back) */
+  speechStart?: number;
+  /** Seconds into the raw file where the last spoken word ends */
+  speechEnd?: number;
+  /** The model that actually spoke it */
+  model: string;
+}
+
+/** What this process has learned about the account's models, so a rejection is only discovered once. */
+const modelDownUntil = new Map<string, number>();
+const noContext = new Set<string>();
+const settingsLevelFor = new Map<string, number>();
+
+/** False once this process has learned that the model rejects previous_text / next_text. */
+export const contextSupported = (model: string) => !noContext.has(model);
+
+/** The models worth trying right now: the ones not recently found to be unavailable to this account. */
+export const usableModels = (models: string[]) => models.filter((m) => (modelDownUntil.get(m) ?? 0) <= Date.now());
+
+/** Forgets what was learned about models (for tests, and after the account or key changes). */
+export function resetModelMemory() {
+  modelDownUntil.clear();
+  noContext.clear();
+  settingsLevelFor.clear();
+}
+
+/** True when the failure means "this account can't use this model", as opposed to a quota or key problem. */
+export function modelUnavailable(err: ElevenError) {
+  const body = err.body.toLowerCase();
+  if (/quota|credits|unusual_activity|invalid_api_key/.test(body)) return false;
+  if (err.status === 404) return true;
+  if (![400, 401, 403, 422].includes(err.status)) return false;
+  return /model/.test(body) && /(not found|not available|unavailable|invalid|unknown|unsupported|not supported|access|upgrade|plan|tier|does not exist|only available|not allowed)/.test(body);
+}
+
+/**
+ * Speaks one chunk of narration with a voice preset. It tries the models in order, and within a
+ * model it steps down through settings the model rejects and drops previous_text/next_text if
+ * the model doesn't take them (the ElevenLabs docs don't list this per model). What it learns is
+ * remembered for the rest of the process.
+ */
+export async function speakChunk(
+  text: string,
+  voiceId: string,
+  outFile: string,
+  opts: { models: string[]; preset: Pick<VoicePreset, "stability" | "similarity" | "style" | "speed">; previousText?: string; nextText?: string },
+): Promise<ChunkSpeech> {
+  const problems: string[] = [];
+  for (const model of opts.models) {
+    if ((modelDownUntil.get(model) ?? 0) > Date.now()) continue;
+    let level = settingsLevelFor.get(model) ?? 0;
+    let useContext = !noContext.has(model);
+    for (;;) {
+      try {
+        const data = await eleven(`/v1/text-to-speech/${voiceId}/with-timestamps?output_format=mp3_44100_128`, {
+          method: "POST",
+          body: JSON.stringify({
+            text,
+            model_id: model,
+            voice_settings: settingsFor(model, opts.preset, level),
+            ...(useContext && opts.previousText ? { previous_text: opts.previousText } : {}),
+            ...(useContext && opts.nextText ? { next_text: opts.nextText } : {}),
+          }),
+        });
+        settingsLevelFor.set(model, level);
+        fs.writeFileSync(outFile, Buffer.from(data.audio_base64, "base64"));
+        const words = wordsFromAlignment(data.alignment ?? data.normalized_alignment);
+        return { words, speechStart: words[0]?.start, speechEnd: words[words.length - 1]?.end, model };
+      } catch (err) {
+        if (!(err instanceof ElevenError)) throw err;
+        const body = err.body.toLowerCase();
+        if ([400, 422].includes(err.status)) {
+          if (useContext && /previous_text|next_text|previous_request|next_request|stitch/.test(body)) {
+            useContext = false;
+            noContext.add(model);
+            continue;
+          }
+          if (level < MAX_SETTINGS_LEVEL && /voice_settings|stability|style|speed|similarity|setting/.test(body)) {
+            level++;
+            continue;
+          }
+        }
+        if (modelUnavailable(err)) {
+          modelDownUntil.set(model, Date.now() + 10 * 60 * 1000);
+          problems.push(`${model}: ${err.message}`);
+          console.warn(`ElevenLabs model ${model} isn't available (${err.status}); trying the next one.`);
+          break;
+        }
+        throw err;
+      }
+    }
+  }
+  throw new Error(`No ElevenLabs model could voice this line.${problems.length ? ` ${problems.join(" ")}` : ""}`);
 }
 
 // ---------- Pexels (stock footage) ----------
