@@ -494,11 +494,12 @@ app.put("/api/videos/:id/cast", async (req, res) => {
       appearance,
       voiceId,
       portraits,
-      age: c.age || undefined,
-      accent: c.accent || undefined,
-      tone: c.tone || undefined,
-      settings: c.settings,
-      fx: c.fx,
+      // Left out of the request: keep what was saved. Sent empty: clear it.
+      age: (c.age ?? previous?.age) || undefined,
+      accent: (c.accent ?? previous?.accent) || undefined,
+      tone: (c.tone ?? previous?.tone) || undefined,
+      settings: c.settings ?? previous?.settings,
+      fx: c.fx ?? previous?.fx,
     });
   }
   // Delete portraits of removed characters, or ones replaced because the look changed.

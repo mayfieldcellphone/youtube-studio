@@ -325,7 +325,9 @@ function scriptCraft(video: Video) {
   return `${shape}
 
 VOICE AND STYLE (this is narration for a voiceover, so write for the ear):
-- Short sentences. Mix in a longer one for rhythm. One idea per sentence.
+- The first sentence is the hook and must land inside the first 5 seconds of speech: a concrete, startling moment, not background.
+- Short, punchy sentences. Vary the length on purpose: a run of short ones, then one long sentence that rolls, then a very short one to land the beat. One idea per sentence.
+- Keep what is confirmed apart from what is disputed. Confirmed facts are stated flatly ("Records show…"); disputed or unproven claims are labelled as such in the same breath ("Some researchers believe…", "No document proves it, but…"). Never state a theory as fact.
 - Concrete and sensory: names, places, dates, numbers, what it looked, sounded and felt like. Show, don't summarise.
 - Use present tense for dramatic moments ("It's 2 a.m. The radio goes silent.").
 - Occasionally speak to the viewer as "you" to pull them in.
@@ -346,15 +348,27 @@ function castCraft(channel: Channel, video: Video) {
   const cast = allCast(channel, video);
   const names = cast.map((c) => speakerKey(c.name));
   if (!names.length) return "";
-  const who = cast.map((c) => `${speakerKey(c.name)}${c.role ? ` (${c.role})` : ""}`).join(", ");
+  const who = cast
+    .map((c) => `${speakerKey(c.name)}${c.role ? ` (${c.role})` : ""}${c.tone ? `, voice: ${c.tone}` : ""}`)
+    .join("; ");
   return `
 
-CHARACTER VOICES (this video has actors for these speakers: ${who}):
-- You may add 2-4 short dramatised scenes where real people from the story speak in their own voice. Keep character lines to about 20-30% of the spoken words; the narrator carries the story.
-- Write each spoken character line on its own line, starting with the speaker label in capitals and a colon, and optionally one delivery cue in square brackets: "JOAN: [firm] I deny it entirely."
-- Only use speaker labels from this list: ${names.join(", ")}, plus NARRATOR. Lines with no label are read by the narrator.
-- Use words actually recorded in the research (trial records, letters, inscriptions) wherever they exist. Invented lines must be short, plausible for the person and the era, and never presented as a quote. Just before each scene, the narrator signals it is a reconstruction ("Imagine the courtroom that morning.").
-- Delivery cues are one or two words describing how the line is spoken (firm, whispering, afraid, cold, laughing). Visual directions stay on their own line in [square brackets] with no label.`;
+SCREENPLAY FORMAT (this video has actors for these speakers: ${who}):
+Write the script as a screenplay, one event per line:
+[NARRATOR] The documentary voice: facts, context, transitions. Most lines are this.
+[SPEAKER | emotion] A character speaking in their own voice, e.g. [HOUDINI | tired, whispering] I can still feel the blow.
+[SFX: train whistle] A sound effect, on its own line, only where it adds atmosphere.
+[MUSIC: low strings, tense] A change in the music's mood, on its own line, rarely.
+[PAUSE: 600ms] A deliberate silence before the next line (200-1500 ms), used for dread, a reveal or after a shock.
+Visual directions go on their own line in [square brackets] with no label or colon, e.g. [slow push-in on the empty tent]; they are not spoken.
+
+Rules for characters:
+- Only use these speaker labels: ${names.join(", ")}, plus NARRATOR. A line with no tag is read by the narrator.
+- Character dialogue is at most 30-40% of the spoken words; the narrator carries the story and every fact.
+- Put dialogue at the key moments (a confrontation, a confession, a last goodbye), in short exchanges of 2-6 lines, not speeches. Open each dramatised scene with a narrator line that signals it ("Imagine the room that night.").
+- Emotion tags are one to three words describing how the line is spoken (firm, whispering, afraid, cold, laughing, interrupting). Use "interrupting" when a character cuts in on the one before, and end the line that gets cut off with a dash.
+- Use words actually recorded in the research (trial records, letters, inscriptions) only where they exist, and mark such a line with its source: [HOUDINI | firm] [SOURCE: letter to his brother, 1924] The words as recorded. Every other character line is a reconstruction: it must be short, plausible for the person and era, and must never be presented as something they really said. Never put invented words in a real person's mouth as a quote.
+- A line that is an invented reconstruction needs no extra tag (it is treated as dramatised); do not write the narrator as saying "he said" before an invented line.`;
 }
 
 export async function generateScript(channel: Channel, video: Video) {
@@ -385,7 +399,7 @@ ${draft.script}
 
 First, list the biggest problems briefly: a hook that needs context to understand, slow or generic lines, clichés, vague statements, too many names, dates and numbers to follow by ear, no person to care about, missing tension or re-hook, a flat or anticlimactic ending, facts not supported by the research, lines that are hard to say aloud.
 Judge it as a viewer scrolling at midnight: would they stop at line 1, and still be there at the end?
-Then rewrite the whole script to fix them. Keep every fact accurate, keep it the right length, and make every line earn its place.
+Then rewrite the whole script to fix them. Keep every fact accurate, keep it the right length, and make every line earn its place. If the script uses screenplay tags ([NARRATOR], [NAME | emotion], [SFX: ...], [MUSIC: ...], [PAUSE: ...], [SOURCE: ...]), keep that exact format on every line.
 
 The standard it must meet:
 ${scriptCraft(video)}${castCraft(channel, video)}`,

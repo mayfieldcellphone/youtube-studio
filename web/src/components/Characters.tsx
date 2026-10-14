@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ImageIcon, Play, Plus, RefreshCw, Sparkles, Trash2, UserRound, X } from "lucide-react";
-import { api, type DesignedVoice, type SuggestedCharacter, type Video, type Voice } from "../api";
+import { api, CHARACTER_FX_OPTIONS, type CastMember, type CharacterFx, type DesignedVoice, type SuggestedCharacter, type Video, type Voice } from "../api";
 import { ErrorBox, Spinner, useAction } from "./ui";
 
 /** A character being set up: a suggestion or a manual one, before it is saved. */
@@ -16,6 +16,67 @@ interface Draft {
   choice: string;
   designing: boolean;
   error?: string;
+}
+
+/** What the server needs to keep about a saved character when the cast is saved again. */
+const toInput = (c: CastMember) => ({
+  name: c.name,
+  role: c.role,
+  description: c.description,
+  appearance: c.appearance,
+  voiceId: c.voiceId,
+  age: c.age,
+  accent: c.accent,
+  tone: c.tone,
+  settings: c.settings,
+  fx: c.fx,
+});
+
+/** Age, accent, tone, voice settings and sound treatment for a saved character. */
+function VoiceDetails({ member, busy, onSave }: { member: CastMember; busy: boolean; onSave: (patch: Partial<CastMember>) => void }) {
+  const [age, setAge] = useState(member.age ?? "");
+  const [accent, setAccent] = useState(member.accent ?? "");
+  const [tone, setTone] = useState(member.tone ?? "");
+  const [stability, setStability] = useState(member.settings?.stability ?? 0.4);
+  const [style, setStyle] = useState(member.settings?.style ?? 0.45);
+  const [speed, setSpeed] = useState(member.settings?.speed ?? 1);
+  const [fx, setFx] = useState<CharacterFx>(member.fx ?? "none");
+  const slider = (label: string, value: number, set: (n: number) => void, min: number, max: number, step: number) => (
+    <label className="block text-xs">
+      <span className="flex justify-between"><span>{label}</span><span className="tabular-nums text-zinc-400">{value}</span></span>
+      <input type="range" className="w-full" min={min} max={max} step={step} value={value} onChange={(e) => set(Number(e.target.value))} />
+    </label>
+  );
+  return (
+    <details className="w-full basis-full text-sm">
+      <summary className="cursor-pointer text-xs text-zinc-400">Voice details and sound</summary>
+      <div className="mt-2 space-y-3">
+        <div className="grid gap-2 sm:grid-cols-3">
+          <input value={age} maxLength={40} placeholder="Age, e.g. 50s" aria-label="Age" onChange={(e) => setAge(e.target.value)} />
+          <input value={accent} maxLength={60} placeholder="Accent, e.g. Hungarian-American" aria-label="Accent" onChange={(e) => setAccent(e.target.value)} />
+          <input value={tone} maxLength={100} placeholder="Tone, e.g. tired, wry" aria-label="Tone" onChange={(e) => setTone(e.target.value)} />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {slider("Stability (lower = more expressive)", stability, setStability, 0, 1, 0.05)}
+          {slider("Style", style, setStyle, 0, 1, 0.05)}
+          {slider("Speed", speed, setSpeed, 0.7, 1.2, 0.01)}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <select value={fx} onChange={(e) => setFx(e.target.value as CharacterFx)} aria-label="Sound treatment">
+            {CHARACTER_FX_OPTIONS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          </select>
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={busy}
+            onClick={() => onSave({ age, accent, tone, settings: { stability, style, speed }, fx })}
+          >
+            Save voice details
+          </button>
+        </div>
+      </div>
+    </details>
+  );
 }
 
 const newKey = () => Math.random().toString(36).slice(2);
@@ -162,7 +223,7 @@ export function Characters({
       const incomplete = drafts.find((d) => !d.name.trim() || !d.choice);
       if (incomplete) throw new Error(`Choose a voice for ${incomplete.name || "every character"} first, or remove it.`);
       const characters = [
-        ...keep.map((c) => ({ name: c.name, role: c.role, description: c.description, appearance: c.appearance, voiceId: c.voiceId })),
+        ...keep.map(toInput),
         ...drafts.map((d) => ({
           name: d.name.trim(),
           role: d.role.trim(),
@@ -223,6 +284,15 @@ export function Characters({
                 {c.role && <p className="text-xs text-zinc-400">{c.role}</p>}
                 {c.appearance && <p className="text-xs text-zinc-500">Look: {c.appearance}</p>}
               </div>
+              <VoiceDetails
+                member={c}
+                busy={!!busy}
+                onSave={(patch) =>
+                  run(`details-${c.name}`, async () =>
+                    onSaved(await api.saveCast(video.id, cast.map((x) => toInput(x.name === c.name ? { ...x, ...patch } : x)))),
+                  )
+                }
+              />
               {picturesReady && (
                 <button
                   type="button"
@@ -247,7 +317,7 @@ export function Characters({
                     onSaved(
                       await api.saveCast(
                         video.id,
-                        updated.map((x) => ({ name: x.name, role: x.role, description: x.description, appearance: x.appearance, voiceId: x.voiceId })),
+                        updated.map(toInput),
                       ),
                     );
                     if (picturesReady) await paint([c.name]);

@@ -38,7 +38,22 @@ export interface CastMember {
   appearance?: string;
   /** Which painted portraits exist (16:9 and 9:16) */
   portraits?: { landscape: boolean; portrait: boolean };
+  age?: string;
+  accent?: string;
+  tone?: string;
+  /** Default ElevenLabs voice settings for this character */
+  settings?: { stability?: number; style?: number; speed?: number };
+  fx?: CharacterFx;
 }
+
+export type CharacterFx = "none" | "warm" | "close" | "hall" | "radio";
+export const CHARACTER_FX_OPTIONS: [CharacterFx, string][] = [
+  ["none", "None"],
+  ["warm", "Warm (rounder, softer top end)"],
+  ["close", "Close and intimate"],
+  ["hall", "Large room (courtroom, church)"],
+  ["radio", "Telephone / old radio"],
+];
 
 /** A character the AI proposes for a story, before any voice is made. */
 export interface SuggestedCharacter {
@@ -220,7 +235,14 @@ export const api = {
     request<{ previews: DesignedVoice[] }>("POST", "/api/voices/design", { description, text }),
   saveCast: (
     id: string,
-    characters: { name: string; role?: string; description?: string; appearance?: string; voiceId?: string; generatedVoiceId?: string }[],
+    characters: (Pick<CastMember, "age" | "accent" | "tone" | "settings" | "fx"> & {
+      name: string;
+      role?: string;
+      description?: string;
+      appearance?: string;
+      voiceId?: string;
+      generatedVoiceId?: string;
+    })[],
   ) => request<Video>("PUT", `/api/videos/${id}/cast`, { characters }),
   paintPortrait: (id: string, name: string, regenerate = false) =>
     request<Video>("POST", `/api/videos/${id}/cast/portrait`, { name, regenerate }),
