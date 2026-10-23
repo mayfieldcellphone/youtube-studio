@@ -31,4 +31,14 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
           # The key may only run scripts/vps-deploy.sh on the server (forced command in authorized_keys).
-          ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes "root@$VPS_HOST" deploy
+          # Connections from GitHub's runners sometimes time out, so retry those (exit 255) a few times;
+          # a failure of the update itself is reported straight away.
+          for attempt in 1 2 3 4 5; do
+            status=0
+            ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=30 \
+              -o ServerAliveInterval=30 -o ServerAliveCountMax=10 "root@$VPS_HOST" deploy || status=$?
+            [ "$status" -ne 255 ] && exit "$status"
+            echo "Couldn't reach the VPS (attempt $attempt of 5); retrying in 20 seconds."
+            sleep 20
+          done
+          exit 255
