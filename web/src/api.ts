@@ -16,6 +16,7 @@ export interface Channel {
   voiceEngine?: VoiceEngine;
   voiceId?: string;
   voiceStyle?: string;
+  voiceSpeed?: number;
   affiliateLinks?: string;
   look?: "cinematic" | "clean" | "warm";
   grade?: "none" | "sepia" | "desaturated";
@@ -206,7 +207,7 @@ export const api = {
   research: (id: string) => request<Video>("POST", `/api/videos/${id}/research`),
   render: (id: string) => request<Video>("POST", `/api/videos/${id}/render`),
   voices: (engine: VoiceEngine) => request<Voice[]>("GET", `/api/voices?engine=${engine}`),
-  previewVoiceDetailed: async (choice: { engine: VoiceEngine; voiceId?: string; style?: string; preset?: PresetId }): Promise<VoicePreview> => {
+  previewVoiceDetailed: async (choice: { engine: VoiceEngine; voiceId?: string; style?: string; speed?: number; preset?: PresetId }): Promise<VoicePreview> => {
     const res = await fetch("/api/voices/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

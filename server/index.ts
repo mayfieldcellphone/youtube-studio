@@ -230,6 +230,7 @@ const channelInput = z.object({
   voiceEngine: z.enum(["elevenlabs", "gemini", "kokoro"]).optional(),
   voiceId: z.string().max(100).optional(),
   voiceStyle: z.string().max(600).optional(),
+  voiceSpeed: z.number().min(1).max(1.3).optional(),
   look: z.enum(["cinematic", "clean", "warm"]).optional(),
   grade: z.enum(["none", "sepia", "desaturated"]).optional(),
   grain: z.boolean().optional(),
@@ -569,11 +570,12 @@ app.post("/api/voices/preview", async (req, res) => {
     .object({
       engine: engineParam,
       voiceId: z.string().max(100).optional(),
-      style: z.string().max(300).optional(),
+      style: z.string().max(600).optional(),
+      speed: z.number().min(1).max(1.3).optional(),
       preset: z.enum(PRESET_IDS).optional(),
     })
     .parse(req.body);
-  const voice = { engine: body.engine, voiceId: body.voiceId, style: body.style };
+  const voice = { engine: body.engine, voiceId: body.voiceId, style: body.style, speed: body.speed };
   if (!engineReady(voice.engine)) throw new HttpError(400, "Add this voice engine's key on the Setup page first.");
   if (!ffmpegAvailable()) throw new HttpError(500, "FFmpeg is missing. Run npm install again.");
   // About 20 seconds, made with the same steps as a real video, so what you hear is what you get.

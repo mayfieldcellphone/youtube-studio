@@ -211,7 +211,7 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
                 onClick={() =>
                   preview.run("preview", async () =>
                     (async () => {
-                      const p = await api.previewVoiceDetailed({ engine, voiceId: form.voiceId || undefined, style: form.voiceStyle || undefined, preset: previewPreset });
+                      const p = await api.previewVoiceDetailed({ engine, voiceId: form.voiceId || undefined, style: form.voiceStyle || undefined, speed: form.voiceSpeed, preset: previewPreset });
                       setPreviewUrl(p.url);
                       setPreviewStats(p);
                     })(),
@@ -244,7 +244,7 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
               onChange={(e) => set("voiceStyle", e.target.value)}
               placeholder={
                 form.look === "cinematic"
-                  ? "Default: a seasoned true-crime documentary narrator, low, calm and controlled, building tension"
+                  ? "Default: a gripping history storyteller, natural and conversational, about 160 words per minute"
                   : form.look === "warm"
                     ? "Default: a trusted friend who is good with money, warm and confident"
                     : "Default: an energetic but credible tech YouTuber, clear and brisk"
@@ -252,6 +252,17 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
             />
           </Field>
         )}
+        <Field
+          label="Narration speed"
+          hint="Speeds up the finished narration without changing the voice's pitch. Click Preview to hear it; the words/min shown there should be about 150-170 for stories."
+        >
+          <select value={String(form.voiceSpeed ?? 1)} onChange={(e) => set("voiceSpeed", Number(e.target.value))}>
+            <option value="1">As recorded</option>
+            <option value="1.08">A little faster (8%)</option>
+            <option value="1.15">Faster (15%)</option>
+            <option value="1.22">Much faster (22%)</option>
+          </select>
+        </Field>
         <CastEditor
           cast={form.cast ?? []}
           voices={castVoices}

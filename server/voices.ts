@@ -3,7 +3,7 @@ import path from "node:path";
 import { DATA_DIR, type Channel } from "./db";
 import { DEFAULT_VOICE_ID, ELEVEN_ACTING_MODEL, elevenSpeak, listVoices as listElevenVoices, voiceConfigured as elevenConfigured, type Word } from "./media";
 import { narrateWithEleven, wordsPerMinute } from "./narration";
-import { applyFx, audioDuration, joinWithGaps, masterVoice } from "./audioPost";
+import { applyFx, audioDuration, joinWithGaps, masterVoice, runFfmpeg } from "./audioPost";
 import { isConversation, planDialogueGroups, speakDialogue } from "./dialogue";
 import type { CharacterFx } from "./characterFx";
 import { characterPreset, DEFAULT_PRESETS, gapSeconds, interruptionOverlap, modelChain, presetFor, resolvePresets, type PresetId, type VoicePreset } from "./voicePresets";
@@ -22,6 +22,8 @@ export interface VoiceChoice {
   voiceId?: string;
   /** Gemini only: how to read the text, e.g. "slow, suspenseful documentary narrator". */
   style?: string;
+  /** Narration speed-up applied after recording, pitch kept (1 = as recorded). */
+  speed?: number;
 }
 
 export interface VoiceOption {
@@ -38,12 +40,12 @@ export function voiceFor(channel: Channel): VoiceChoice {
     channel.voiceEngine ?? (geminiConfigured() ? "gemini" : elevenConfigured() ? "elevenlabs" : "kokoro");
   // Without a style, Gemini reads neutrally; pick one that fits the channel's look.
   const style = channel.voiceStyle?.trim() || DEFAULT_STYLES[channel.look ?? "clean"];
-  return { engine, voiceId: validVoice(engine, channel.voiceId), style };
+  return { engine, voiceId: validVoice(engine, channel.voiceId), style, speed: channel.voiceSpeed };
 }
 
 export const DEFAULT_STYLES = {
   cinematic:
-    "You are a seasoned true-crime documentary narrator. Speak in a low, intimate voice at a confident, steady pace that holds attention, a little faster than a slow read. Let tension build with short pauses before reveals, and drop your voice slightly on ominous lines. Never sound cheerful",
+    "Tell this like a gripping storyteller on a popular history YouTube channel: natural and conversational, as if telling a friend something incredible, at a brisk pace of about 160 words per minute. Let your tone follow the meaning, a little lower on dark details and a touch faster as tension builds. Pause only at full stops, never mid-sentence. Never sound like you are reading aloud or performing",
   warm: "You are a trusted friend who is good with money. Speak warmly and confidently at a relaxed pace, with a hint of a smile, emphasising the key numbers",
   clean: "You are an energetic but credible tech YouTuber. Speak clearly and briskly, with natural enthusiasm and emphasis on the most useful points",
 } as const;
@@ -226,7 +228,17 @@ export async function synthesizeScenes(
       const file = `${outBase}-${i}.wav`;
       writeWav(file, part, raw.rate);
       const duration = part.length / raw.rate;
-      results[i] = { file, words: estimateWords(texts[i], duration), duration, gapAfter: gapSeconds(presetOf(i), i * 8 + 7) };
+      // Scenes cut from one recording already end in the narrator's own pause; adding a preset
+      // gap on top made the narration drag. Only the last scene of the recording gets one.
+      const last = k === scenes.length - 1;
+      results[i] = { file, words: estimateWords(texts[i], duration), duration, gapAfter: last ? gapSeconds(presetOf(i), i * 8 + 7) : 0.04 };
+    }
+  }
+  // The channel's narration speed: sped up with pitch kept, captions scaled to match.
+  const speed = Math.min(1.3, Math.max(1, voice.speed ?? 1));
+  if (speed > 1.001) {
+    for (const [i, scene] of results.entries()) {
+      if (scene && !characters[i]) results[i] = await speedUp(scene, speed);
     }
   }
   // A character who cuts in on the previous line starts slightly early, over its last moments.
@@ -240,6 +252,20 @@ export async function synthesizeScenes(
     }
   }
   return results;
+}
+
+/** Plays a scene faster with its pitch kept, and moves its word timings to match. */
+async function speedUp(scene: SceneAudio, tempo: number): Promise<SceneAudio> {
+  const out = `${scene.file.replace(/\.wav$/, "")}-fast.wav`;
+  // atempo drops its last few milliseconds, so give it silence to drop instead of the end of a word.
+  await runFfmpeg(["-i", scene.file, "-af", `apad=pad_dur=0.06,atempo=${tempo.toFixed(4)}`, out]);
+  fs.renameSync(out, scene.file);
+  return {
+    ...scene,
+    duration: await audioDuration(scene.file),
+    words: scene.words.map((w) => ({ ...w, start: w.start / tempo, end: w.end / tempo })),
+    gapAfter: scene.gapAfter === undefined ? undefined : scene.gapAfter / tempo,
+  };
 }
 
 /**

@@ -42,6 +42,8 @@ export interface Channel {
   voiceId?: string;
   /** Gemini only: how the narrator should read, e.g. "slow, suspenseful documentary narrator" */
   voiceStyle?: string;
+  /** Narration speed-up after recording, pitch kept (1 = as recorded) */
+  voiceSpeed?: number;
   /** Affiliate/product links the AI may add to descriptions, one per line */
   affiliateLinks?: string;
   /** Color grade for automatically made videos */
