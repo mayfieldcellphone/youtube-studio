@@ -598,7 +598,7 @@ function ffmpeg(args: string[], onProgress?: (seconds: number) => void, cwd?: st
       const lines = log.split(/[\r\n]+/).filter((line) => !FFMPEG_NOISE.test(line));
       console.error(`FFmpeg failed (exit ${code}):\n${lines.slice(-40).join("\n")}`);
       if (/No space left on device/i.test(log)) {
-        return reject(new Error("The app's storage is full, so the video couldn't be saved. Delete videos you no longer need, or give the app more storage (on Railway: upgrade to Hobby for 5 GB)."));
+        return reject(new Error("The app's storage is full, so the video couldn't be saved. Delete videos you no longer need, or give the server more disk space."));
       }
       reject(new Error(`Video editing failed:\n${lines.slice(-8).join("\n").slice(-800)}`));
     });

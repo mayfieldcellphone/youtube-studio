@@ -1,4 +1,4 @@
-# Used by Railway (or any Docker host) to run YouTube Studio online.
+# Runs Channel Planner on a server (see docker-compose.yml and the README).
 FROM node:22-slim
 
 # fontconfig lets FFmpeg find the caption font.

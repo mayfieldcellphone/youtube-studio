@@ -17,13 +17,15 @@ export default function Login({ locked, onLogin }: { locked: boolean; onLogin: (
           <p className="font-medium">This app is online, so it needs a password before anyone can use it.</p>
           <ol className="list-decimal space-y-1.5 pl-5">
             <li>
-              In Railway, open the app's service and click the <b>Variables</b> tab.
+              On the server, open the file <code>.env</code> in the app's folder (on the VPS: <code>/opt/channel-planner/.env</code>).
             </li>
             <li>
-              Click <b>New Variable</b>. Name: <code>APP_PASSWORD</code>. Value: a password of at least 10 characters that only
-              you know.
+              Add a line <code>APP_PASSWORD=</code> followed by a password of at least 10 characters that only you know.
             </li>
-            <li>Click <b>Add</b>, then <b>Deploy</b>. Wait about a minute and reload this page.</li>
+            <li>
+              Restart the app (on the VPS: <code>cd /opt/channel-planner &amp;&amp; docker compose up -d</code>), wait a minute and reload
+              this page.
+            </li>
           </ol>
         </div>
       </div>
