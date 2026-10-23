@@ -902,6 +902,9 @@ async function syncAllChannels() {
 setInterval(syncAllChannels, 30 * 60 * 1000).unref();
 setTimeout(syncAllChannels, 60 * 1000).unref();
 
+// Leftovers of a restore that was cut off.
+for (const dir of ["restore-tmp", "restore-new"]) fs.rmSync(path.join(DATA_DIR, dir), { recursive: true, force: true });
+
 recoverInterruptedRenders();
 recoverInterruptedPipelines();
 
@@ -913,6 +916,9 @@ const server = app.listen(PORT, HOST, () => {
     console.log(`\n  Channel Planner is running. Open http://localhost:${PORT} in your browser.\n  Keep this window open while you use the app.\n`);
   }
 });
+// Node cuts off any request that takes over 5 minutes to arrive (a 408). Uploading a backup or a
+// long video from home takes longer, so wait as long as it takes; idle connections still time out.
+server.requestTimeout = 0;
 
 // Hosts stop the old copy with SIGTERM on every update; exit cleanly so it isn't reported as a crash.
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
