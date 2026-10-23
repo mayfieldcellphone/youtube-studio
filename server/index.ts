@@ -813,7 +813,18 @@ app.get("/api/backup", (_req, res) => {
   });
 });
 
-const restoreUpload = multer({ dest: path.join(DATA_DIR, "restore-tmp"), limits: { fileSize: 50 * 1024 ** 3 } });
+const RESTORE_TMP = path.join(DATA_DIR, "restore-tmp");
+const restoreUpload = multer({
+  storage: multer.diskStorage({
+    // Created per upload: the folder is cleared after each restore and on startup.
+    destination: (_req, _file, cb) => {
+      fs.mkdirSync(RESTORE_TMP, { recursive: true });
+      cb(null, RESTORE_TMP);
+    },
+    filename: (_req, _file, cb) => cb(null, `${crypto.randomUUID()}.tar.gz`),
+  }),
+  limits: { fileSize: 50 * 1024 ** 3 },
+});
 
 app.post("/api/restore", restoreUpload.single("file"), async (req, res) => {
   const archive = req.file?.path;
@@ -839,7 +850,7 @@ app.post("/api/restore", restoreUpload.single("file"), async (req, res) => {
     }
   } finally {
     fs.rmSync(staging, { recursive: true, force: true });
-    fs.rmSync(path.dirname(archive), { recursive: true, force: true });
+    fs.rmSync(RESTORE_TMP, { recursive: true, force: true });
   }
   console.log("Backup restored; restarting to load it.");
   res.json({ ok: true });
