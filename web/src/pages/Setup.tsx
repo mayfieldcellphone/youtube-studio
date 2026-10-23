@@ -190,9 +190,9 @@ export default function Setup() {
 
       <Section title="Advanced: app address">
         <p>
-          Leave this empty on your computer, and on Railway (the app finds its Railway address by itself). Fill it in only if you
-          give the app your own domain, for example <code>https://studio.example.com</code>. It changes the YouTube redirect
-          address above.
+          Leave this empty: on your computer the app uses localhost, and on a server it uses the APP_URL set there (for example{" "}
+          <code>https://planner.repairrange.io</code>). Fill it in only to override that. It changes the YouTube redirect address
+          above.
         </p>
         {field("APP_URL", "App address", "http://localhost:3000", false)}
       </Section>
