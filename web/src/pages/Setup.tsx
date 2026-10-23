@@ -197,6 +197,8 @@ export default function Setup() {
         {field("APP_URL", "App address", "http://localhost:3000", false)}
       </Section>
 
+      <BackupSection />
+
       <Section title="Tools that pair well with this app">
         <ul className="space-y-1.5">
           <li><b>CapCut</b> (free): polish a video the app made (add music, effects), or edit your own. Export 1080p and upload it here.</li>
@@ -387,5 +389,45 @@ function VoicePresetsEditor() {
       </div>
       <ErrorBox error={error} />
     </div>
+  );
+}
+
+/** Download everything as one file, or load such a file: used to move the app to another server. */
+function BackupSection() {
+  const [file, setFile] = useState<File | null>(null);
+  const [done, setDone] = useState(false);
+  const { busy, error, run } = useAction();
+  return (
+    <Section title="Backup and move">
+      <p>
+        Download one file with all your channels, videos, settings and keys. Load it into Channel Planner on another server to
+        move everything there. Keep the file private: it contains your keys.
+      </p>
+      <a className="btn-secondary mt-3 inline-flex" href="/api/backup" download>
+        Download backup
+      </a>
+      <div className="mt-4 space-y-2 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+        <p>
+          <b>Restore:</b> replaces everything in this copy of the app with the backup, then the app restarts (about a minute).
+        </p>
+        <input type="file" accept=".gz,application/gzip" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        <button
+          className="btn-primary"
+          disabled={!file || !!busy || done}
+          onClick={() => {
+            if (!file || !confirm("Replace all channels, videos and settings in this app with the backup?")) return;
+            run("restore", async () => {
+              await api.restore(file);
+              setDone(true);
+            });
+          }}
+        >
+          {busy && <Spinner />} Restore backup
+        </button>
+        {busy && <p className="text-xs text-zinc-500">Uploading… Large backups with many videos take a while; keep this page open.</p>}
+        {done && <p className="text-green-600">Restored. The app is restarting: wait a minute, then reload this page and log in.</p>}
+        <ErrorBox error={error} />
+      </div>
+    </Section>
   );
 }

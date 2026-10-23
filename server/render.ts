@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
+import os from "node:os";
 import ffmpegPath from "ffmpeg-static";
 import { DATA_DIR, db, UPLOAD_DIR, WORK_DIR, type VideoLook } from "./db";
 import { planScenes } from "./ai";
@@ -580,6 +581,10 @@ async function buildEffectBed(cues: TimedCue[], total: number, work: string, not
 function ffmpeg(args: string[], onProgress?: (seconds: number) => void, cwd?: string) {
   return new Promise<void>((resolve, reject) => {
     const proc = spawn(ffmpegPath!, ["-y", "-hide_banner", "-nostdin", "-loglevel", "error", "-stats", ...args], { cwd });
+    // Lower priority, so the app (and anything else on a small server) stays responsive while rendering.
+    try {
+      if (proc.pid) os.setPriority(proc.pid, 10);
+    } catch {}
     let log = "";
     proc.stderr.on("data", (chunk: Buffer) => {
       const text = chunk.toString();

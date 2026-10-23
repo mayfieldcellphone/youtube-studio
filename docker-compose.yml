@@ -1,0 +1,19 @@
+# Runs Channel Planner on a VPS (see "Run it on a VPS" in the README).
+# Secrets (APP_PASSWORD etc.) go in a .env file next to this one, which is never committed.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: "8080"
+    # Only reachable through the server's web server (which adds https), not directly from outside.
+    ports:
+      - "127.0.0.1:3020:8080"
+    volumes:
+      - planner-data:/data
+    # Leave some of a small server's processor for other apps while a video renders.
+    cpus: 0.9
+
+volumes:
+  planner-data:

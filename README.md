@@ -44,6 +44,16 @@ Open the app from any computer or phone, with nothing to download. [Railway](htt
 
 The app detects its Railway address by itself, so leave **App address** empty. An update restarts the app, and a video that was rendering at that moment has to be started again.
 
+## Run it on a VPS (Docker), updated on every GitHub push
+
+`docker-compose.yml` runs the app on `127.0.0.1:3020` with its data in a Docker volume. The server's web server (nginx, Caddy…) forwards an https address such as `https://planner.example.com` to it.
+
+1. Clone the repo to `/opt/channel-planner` and create `/opt/channel-planner/.env` with at least `HOST=0.0.0.0`, `APP_PASSWORD=…` (10+ characters) and `APP_URL=https://planner.example.com`.
+2. `docker compose up -d --build`, then point the web server at `127.0.0.1:3020` with an https certificate.
+3. Auto-update: add an SSH key to root's `authorized_keys` restricted to `command="/opt/channel-planner/scripts/vps-deploy.sh",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding`, and set the repository secrets `VPS_HOST` (server IP), `VPS_SSH_KEY` (that key's private half) and `VPS_KNOWN_HOSTS` (the server's host key line). `.github/workflows/deploy.yml` then runs the update after every push to `main`.
+
+**Moving from another server:** Setup → **Backup and move** → **Download backup** on the old copy, then **Restore backup** on the new one.
+
 ## Run it (developers)
 
 ```bash

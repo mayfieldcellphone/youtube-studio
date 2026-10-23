@@ -259,6 +259,11 @@ export const api = {
   },
   thumbnailUrl: (v: Video) => `/api/videos/${v.id}/thumbnail?t=${encodeURIComponent(v.updatedAt)}`,
   publish: (id: string) => request<Video & { uploading: boolean }>("POST", `/api/videos/${id}/publish`),
+  restore: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<{ ok: boolean }>("POST", "/api/restore", form);
+  },
   uploading: () => request<string[]>("GET", "/api/uploads"),
   startPipeline: (videoIds: string[], stopAfter: StopAfter) =>
     request<{ queued: number }>("POST", "/api/pipeline", { videoIds, stopAfter }),

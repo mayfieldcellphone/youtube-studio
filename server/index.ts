@@ -1,13 +1,14 @@
 import "dotenv/config";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import { spawn } from "node:child_process";
 import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import cookieParser from "cookie-parser";
 import multer from "multer";
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { db, publicChannel, publicVideo, UPLOAD_DIR, WORK_DIR, type Video } from "./db";
+import { DATA_DIR, db, publicChannel, publicVideo, UPLOAD_DIR, WORK_DIR, type Video } from "./db";
 import { aiConfigured, generateIdeas, generateMetadata, generateScript, research, splitStoryIntoSeries, suggestCast } from "./ai";
 import { createDesignedVoice, designVoice, footageConfigured, voiceCharactersLeft, voiceConfigured } from "./media";
 import { engineReady, geminiConfigured, listVoices, previewVoice, voiceFor, type VoiceEngine } from "./voices";
@@ -792,6 +793,58 @@ app.post("/api/videos/:id/publish", (req, res) => {
     })
     .finally(() => uploading.delete(video.id));
   res.json({ ...publicVideo(db.video(video.id)!), uploading: true });
+});
+
+// ---------- Backup and restore (moving the app to another server) ----------
+
+/** Everything in the data folder except caches that are rebuilt on their own. */
+const BACKUP_EXCLUDES = ["./models", "./work", "./restore-tmp", "./restore-new"];
+
+app.get("/api/backup", (_req, res) => {
+  const date = new Date().toISOString().slice(0, 10);
+  res.setHeader("Content-Type", "application/gzip");
+  res.setHeader("Content-Disposition", `attachment; filename="channel-planner-backup-${date}.tar.gz"`);
+  const tar = spawn("tar", ["-czf", "-", ...BACKUP_EXCLUDES.map((e) => `--exclude=${e}`), "-C", DATA_DIR, "."]);
+  tar.stdout.pipe(res);
+  tar.stderr.on("data", (d: Buffer) => console.error(`Backup: ${d.toString().trim()}`));
+  // GNU tar exits 1 when a file changed while it was read (e.g. db.json); the backup is still usable.
+  tar.on("close", (code) => {
+    if (code && code > 1) res.destroy(new Error(`tar exited with ${code}`));
+  });
+});
+
+const restoreUpload = multer({ dest: path.join(DATA_DIR, "restore-tmp"), limits: { fileSize: 50 * 1024 ** 3 } });
+
+app.post("/api/restore", restoreUpload.single("file"), async (req, res) => {
+  const archive = req.file?.path;
+  if (!archive) throw new HttpError(400, "Choose a backup file first.");
+  const staging = path.join(DATA_DIR, "restore-new");
+  try {
+    fs.rmSync(staging, { recursive: true, force: true });
+    fs.mkdirSync(staging, { recursive: true });
+    await new Promise<void>((resolve, reject) => {
+      const tar = spawn("tar", ["-xzf", archive, "-C", staging]);
+      let err = "";
+      tar.stderr.on("data", (d: Buffer) => (err += d.toString()));
+      tar.on("error", reject);
+      tar.on("close", (code) => (code ? reject(new Error(err.trim() || `tar exited with ${code}`)) : resolve()));
+    });
+    if (!fs.existsSync(path.join(staging, "db.json"))) {
+      throw new HttpError(400, "This isn't a Channel Planner backup (it has no db.json). Download one from Setup → Backup.");
+    }
+    // Replace the current data with the backup's, keeping the downloaded AI models.
+    for (const entry of fs.readdirSync(staging)) {
+      fs.rmSync(path.join(DATA_DIR, entry), { recursive: true, force: true });
+      fs.renameSync(path.join(staging, entry), path.join(DATA_DIR, entry));
+    }
+  } finally {
+    fs.rmSync(staging, { recursive: true, force: true });
+    fs.rmSync(path.dirname(archive), { recursive: true, force: true });
+  }
+  console.log("Backup restored; restarting to load it.");
+  res.json({ ok: true });
+  // The host (Docker, Railway) starts the app again, which loads the restored data.
+  setTimeout(() => process.exit(1), 500);
 });
 
 app.get("/api/uploads", (_req, res) => {
