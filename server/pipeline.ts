@@ -104,6 +104,7 @@ async function run(videoId: string, stopAfter: StopAfter) {
         description: meta.description,
         tags: meta.tags,
         ...(meta.topicTags && { topicTags: meta.topicTags }),
+        ...(meta.thumbBrief && { thumbBrief: meta.thumbBrief }),
         ...(meta.subject && !video.seriesSubject && { seriesSubject: meta.subject }),
       })!;
     }

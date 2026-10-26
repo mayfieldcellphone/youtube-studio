@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { Channel, Research, Video } from "./db";
+import type { Channel, Research, ThumbBrief, Video } from "./db";
 import { google } from "./veo";
 import { allCast, NARRATOR, parseLine, scriptSpeakers, speakerKey } from "./speakers";
 import { anchorCues, prepareScript } from "./screenplay";
@@ -8,6 +8,7 @@ import {
   buildDescription,
   buildTags,
   checkShortScript,
+  cleanThumbBrief,
   finalTitle,
   INTRO_STYLES,
   isHistoryChannel,
@@ -21,6 +22,7 @@ import {
   SHORT_MAX_WORDS,
   SHORT_TITLE_MAX,
   spokenLines,
+  THUMB_LINE_MAX_WORDS,
   type Variation,
 } from "./policy";
 
@@ -227,6 +229,10 @@ export interface Idea {
   angle: string;
   /** The popular film, series, game or book the idea is hooked to (history channels) */
   popCulture?: string;
+  /** Date (YYYY-MM-DD) of the trend event behind the idea, if it is tied to one */
+  trendDate?: string;
+  /** One line: what happened on that date */
+  trendNote?: string;
 }
 
 /** History channels: every idea pairs a documented story with one pop-culture hook the audience already knows. */
@@ -237,6 +243,8 @@ POP-CULTURE INJECTION (required for every idea): pair a real, documented history
 - Vary the hooks across ideas; do not use the same franchise for more than half of them.
 - Prefer a claim the hook makes that the record contradicts, or a real event the hook was clearly inspired by.
 - Never copy another channel's video; take the pattern, not the topic or wording.
+- TREND TIMING: if the hook is tied to a dated event (trailer drop, season release, anniversary, award, news), give its date in "trendDate" (YYYY-MM-DD, today or within the last 30 days; later dates only if it is a confirmed upcoming release) and a one-line "trendNote". Being among the first to publish after the event is the point. Leave both empty for evergreen hooks.
+- SUPPLY GAP: favour hooks where few history channels have covered the connection yet.
 `;
 
 export async function generateIdeas(channel: Channel, count: number, existingTitles: string[], focus?: string) {
@@ -267,6 +275,8 @@ ${isHistoryChannel(channel) ? POP_CULTURE_IDEAS : ""}${focus ? `Focus on: ${focu
         format: { type: "string", enum: ["short", "long"] },
         keyword: str("Main search phrase this video should rank for"),
         angle: str("One sentence: what makes this video different, and why people want it now"),
+        trendDate: str(isHistoryChannel(channel) ? "YYYY-MM-DD of the trend event, or empty if evergreen" : "Leave empty"),
+        trendNote: str(isHistoryChannel(channel) ? "One line: what happened on that date, or empty" : "Leave empty"),
         popCulture: str(isHistoryChannel(channel) ? 'The popular film, series, game or book it is hooked to, as "Title: specific element"' : "Leave empty"),
       }),
     },
@@ -625,6 +635,8 @@ export interface Metadata {
   topicTags?: string[];
   /** Main subject of the video, used in series titles */
   subject?: string;
+  /** Two-line thumbnail plan (history channels) */
+  thumbBrief?: ThumbBrief;
 }
 
 export async function generateMetadata(channel: Channel, video: Video): Promise<Metadata> {
@@ -651,10 +663,22 @@ Write the YouTube upload details for this video:
   }));
 }
 
+/** Thumbnail plans of this channel's three best-performing videos (by average % viewed), as layout examples. */
+function provenThumbBriefs(channel: Channel, video: Video) {
+  return db
+    .videos(channel.id)
+    .filter((v) => v.id !== video.id && v.thumbBrief && v.analytics && v.format === video.format)
+    .sort((a, b) => b.analytics!.averageViewPercentage - a.analytics!.averageViewPercentage)
+    .slice(0, 3)
+    .map((v) => `  - "${v.thumbBrief!.top}" / "${v.thumbBrief!.bottom}" (${v.thumbBrief!.emotion}; ${v.thumbBrief!.visual})`)
+    .join("\n");
+}
+
 /** History's Shadows: the AI writes only the creative parts; code applies the fixed template. */
 async function generateHistoryMetadata(channel: Channel, video: Video): Promise<Metadata> {
   const short = video.format === "short";
   const def = Object.entries(SERIES).find(([name]) => name.toLowerCase() === (video.series ?? "").toLowerCase())?.[1];
+  const proven = provenThumbBriefs(channel, video);
   const prompt = `${channelBrief(channel)}
 
 ${videoBrief(video)}
@@ -666,15 +690,24 @@ Write the YouTube upload details for this video:
   }
 - subject: the main person, object or event the video is about, as a short name (used in series titles).
 - hook: ONE line (under 110 characters) that opens the description. A concrete, true claim from the video. No hashtags, no emoji.
-- topicTags: 3-5 tags specific to THIS video (people, objects, places, events), lower case, no #. Do not repeat generic tags like "history" or "unsolved mysteries".`;
+- topicTags: 3-5 tags specific to THIS video (people, objects, places, events), lower case, no #. Do not repeat generic tags like "history" or "unsolved mysteries".
+- thumbnail: a plan for the thumbnail. Two lines of text, at most ${THUMB_LINE_MAX_WORDS} words each, readable in half a second. The top line grabs attention (a shock, a question, a claim); the bottom line completes the thought like the end of a joke or reveal. Pick ONE emotion it should trigger (shock, dread, disbelief, awe). The visual must show something that really appears in the video (a person, object or place from the research); never invent an element the video does not contain.${
+    proven ? `\n  Layouts that worked for this channel's best videos (reuse the structure, write new words):\n${proven}` : ""
+  }`;
 
-  const res = await generate<{ titles: string[]; subject: string; hook: string; topicTags: string[] }>(
+  const res = await generate<{ titles: string[]; subject: string; hook: string; topicTags: string[]; thumbnail: ThumbBrief }>(
     prompt,
     obj({
       titles: { type: "array", items: str("Title option") },
       subject: str("Main subject, short name"),
       hook: str("One-line description hook"),
       topicTags: { type: "array", items: str("Topic tag without #") },
+      thumbnail: obj({
+        top: str("Attention line, max 4 words"),
+        bottom: str("Completing line, max 4 words"),
+        emotion: str("One target emotion"),
+        visual: str("What the picture shows, from the video itself"),
+      }),
     }),
   );
   const subject = res.subject?.trim() || undefined;
@@ -689,6 +722,7 @@ Write the YouTube upload details for this video:
     topicTags,
     description: buildDescription(merged, [], true),
     tags: buildTags(merged),
+    thumbBrief: cleanThumbBrief(res.thumbnail),
   };
 }
 

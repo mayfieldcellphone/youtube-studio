@@ -115,6 +115,10 @@ export interface Video {
   series?: string;
   seriesSubject?: string;
   popCulture?: string;
+  trendAt?: string;
+  trendNote?: string;
+  demand?: { checkedAt: string; query: string; recentUploads: number; topRecentViews: number; topViews: number; verdict: "gap" | "open" | "crowded" | "unknown"; advice: string };
+  thumbBrief?: { top: string; bottom: string; emotion: string; visual: string };
   lane?: "history" | "drama";
   variation?: { intro: string; outro: string; look: string; technique?: string; assignedAt: string };
   durationSeconds?: number;
@@ -221,8 +225,10 @@ export const api = {
   video: (id: string) => request<Video>("GET", `/api/videos/${id}`),
   createVideo: (v: { channelId: string; title: string; format: VideoFormat; series?: string }) =>
     request<Video>("POST", "/api/videos", v),
+  checkDemand: (id: string) => request<Video>("POST", `/api/videos/${id}/demand`),
+  compileSeries: (channelId: string, series: string) => request<Video>("POST", `/api/channels/${channelId}/compile`, { series }),
   nextSlot: (id: string) => request<{ scheduledAt: string }>("GET", `/api/videos/${id}/next-slot`),
-  updateVideo: (id: string, v: Partial<Omit<Video, "scheduledAt" | "series" | "seriesSubject" | "popCulture" | "lane">> & { scheduledAt?: string | null; series?: string | null; seriesSubject?: string | null; popCulture?: string | null; lane?: "history" | "drama" | null }) =>
+  updateVideo: (id: string, v: Partial<Omit<Video, "scheduledAt" | "series" | "seriesSubject" | "popCulture" | "lane" | "trendAt" | "trendNote">> & { trendAt?: string | null; trendNote?: string | null; scheduledAt?: string | null; series?: string | null; seriesSubject?: string | null; popCulture?: string | null; lane?: "history" | "drama" | null }) =>
     request<Video>("PATCH", `/api/videos/${id}`, v),
   deleteVideo: (id: string) => request("DELETE", `/api/videos/${id}`),
   research: (id: string) => request<Video>("POST", `/api/videos/${id}/research`),

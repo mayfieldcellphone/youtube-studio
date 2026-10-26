@@ -15,8 +15,8 @@ import { pixabayConfigured } from "./stockImages";
 import { engineReady, geminiConfigured, listVoices, previewVoice, voiceFor, type VoiceEngine } from "./voices";
 import { ffmpegAvailable, isRendering, recoverInterruptedRenders, startRender } from "./render";
 import { cancelPipeline, inPipeline, recoverInterruptedPipelines, startPipeline } from "./pipeline";
-import { authUrl, completeAuth, pullDueAnalytics, redirectUri, revokeAccess, syncChannel, uploadAndSchedule, youtubeConfigured } from "./youtube";
-import { assertLaneMatches, assertSlotFree, isHistoryChannel, nextSlot as policySlot } from "./policy";
+import { authUrl, competitionSnapshot, completeAuth, pullDueAnalytics, redirectUri, revokeAccess, syncChannel, uploadAndSchedule, youtubeConfigured } from "./youtube";
+import { assertLaneMatches, assertSlotFree, buildCompilation, isHistoryChannel, nextSlot as policySlot } from "./policy";
 import { privacyPage, termsPage } from "./legal";
 import { hedraConfigured } from "./hedra";
 import { ensurePortrait, portraitFile } from "./portraits";
@@ -289,8 +289,27 @@ app.post("/api/channels/:id/ideas", async (req, res) => {
     .parse(req.body ?? {});
   const existing = db.videos(channel.id).map((v) => v.title);
   const ideas = await generateIdeas(channel, count, existing, focus);
-  const created = ideas.map((idea) => db.createVideo({ channelId: channel.id, ...idea }));
-  res.json(created.map(publicVideo));
+  const created = ideas.map(({ trendDate, trendNote, ...idea }) => {
+    const ms = trendDate ? Date.parse(`${trendDate}T00:00:00Z`) : NaN;
+    return db.createVideo({
+      channelId: channel.id,
+      ...idea,
+      ...(Number.isFinite(ms) && { trendAt: new Date(ms).toISOString(), trendNote: trendNote?.trim() || undefined }),
+    });
+  });
+  // Demand vs supply for each hook (history channels linked to YouTube). Best effort: a failure here never blocks ideas.
+  if (isHistoryChannel(channel) && channel.youtube) {
+    for (const v of created) {
+      if (!v.popCulture) continue;
+      try {
+        db.updateVideo(v.id, { demand: await competitionSnapshot(channel, v.popCulture.replace(/:/, " ")) });
+      } catch (err) {
+        console.warn("Demand check failed:", (err as Error).message);
+        break;
+      }
+    }
+  }
+  res.json(created.map((v) => publicVideo(db.video(v.id)!)));
 });
 
 app.post("/api/channels/:id/sync", async (req, res) => {
@@ -416,6 +435,8 @@ const videoPatch = z
     tags: z.array(z.string().max(100)).max(50),
     scheduledAt: z.string().datetime({ offset: true }).nullable(),
     popCulture: z.string().trim().max(200).nullable(),
+    trendAt: z.string().datetime({ offset: true }).nullable(),
+    trendNote: z.string().trim().max(200).nullable(),
     series: z.string().trim().max(100).nullable(),
     seriesSubject: z.string().trim().max(100).nullable(),
     lane: z.enum(["history", "drama"]).nullable(),
@@ -430,7 +451,7 @@ app.patch("/api/videos/:id", (req, res) => {
   if (video.youtubeVideoId && (patch.title !== undefined || patch.scheduledAt !== undefined)) {
     throw new HttpError(400, "This video is already on YouTube. Edit it in YouTube Studio.");
   }
-  const { scheduledAt, series, seriesSubject, popCulture, lane, channelId, ...rest } = patch;
+  const { scheduledAt, series, seriesSubject, popCulture, trendAt, trendNote, lane, channelId, ...rest } = patch;
   if (channelId !== undefined && channelId !== video.channelId) {
     if (video.youtubeVideoId) throw new HttpError(400, "This video is already on YouTube, so it can't move to another channel.");
     const target = getChannel(channelId);
@@ -449,6 +470,8 @@ app.patch("/api/videos/:id", (req, res) => {
         ...(series !== undefined && { series: series ?? undefined }),
         ...(seriesSubject !== undefined && { seriesSubject: seriesSubject ?? undefined }),
         ...(popCulture !== undefined && { popCulture: popCulture ?? undefined }),
+        ...(trendAt !== undefined && { trendAt: trendAt ?? undefined }),
+        ...(trendNote !== undefined && { trendNote: trendNote ?? undefined }),
         ...(lane !== undefined && { lane: lane ?? undefined }),
       })!,
     ),
@@ -467,6 +490,46 @@ app.get("/api/videos/:id/next-slot", (req, res) => {
   const channel = getChannel(video.channelId);
   if (!isHistoryChannel(channel)) throw new HttpError(400, "This channel doesn't use automatic daily slots.");
   res.json({ scheduledAt: policySlot(channel, video, db.videos()).toISOString() });
+});
+
+/** Re-checks demand vs supply for the video's pop-culture hook (about 200 YouTube quota units). */
+app.post("/api/videos/:id/demand", async (req, res) => {
+  const video = getVideo(req.params.id);
+  const channel = getChannel(video.channelId);
+  const query = (video.popCulture || video.keyword || video.title).replace(/:/, " ");
+  if (!channel.youtube) throw new HttpError(400, "Connect this channel to YouTube first.");
+  res.json(publicVideo(db.updateVideo(video.id, { demand: await competitionSnapshot(channel, query) })!));
+});
+
+/** Turns a series' finished episodes into one long compilation idea; it carries their research notes. */
+app.post("/api/channels/:id/compile", (req, res) => {
+  const channel = getChannel(req.params.id);
+  const { series } = z.object({ series: z.string().trim().min(1).max(100) }).parse(req.body ?? {});
+  const eps = db
+    .videos(channel.id)
+    .filter((v) => v.format === "short" && (v.series ?? "").toLowerCase() === series.toLowerCase() && v.research?.notes && (v.status === "published" || v.status === "scheduled" || v.status === "ready"));
+  let brief;
+  try {
+    brief = buildCompilation(series, eps);
+  } catch (err) {
+    throw new HttpError(400, (err as Error).message);
+  }
+  const created = db.createVideo({
+    channelId: channel.id,
+    title: brief.title,
+    hook: brief.hook,
+    angle: brief.angle,
+    keyword: series.toLowerCase(),
+    format: "long",
+    series: eps[0].series,
+    popCulture: eps[0].popCulture,
+    research: {
+      notes: eps.map((e) => `## ${e.seriesSubject || e.title}\n${e.research!.notes}`).join("\n\n"),
+      sources: eps.flatMap((e) => e.research!.sources),
+      createdAt: new Date().toISOString(),
+    },
+  });
+  res.json(publicVideo(created));
 });
 
 /** Shorts under 40% average viewed, whose hook style should be rewritten. */
@@ -607,6 +670,7 @@ app.post("/api/videos/:id/metadata", async (req, res) => {
         description: meta.description,
         tags: meta.tags,
         ...(meta.topicTags && { topicTags: meta.topicTags }),
+        ...(meta.thumbBrief && { thumbBrief: meta.thumbBrief }),
         ...(meta.subject && !video.seriesSubject && { seriesSubject: meta.subject }),
       })!,
     ),
