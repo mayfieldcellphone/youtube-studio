@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { DATA_DIR } from "./db";
+import { budgetStatus } from "./aiBudget";
 
 /**
  * Keys and settings the user can enter on the Setup page. They are saved to
@@ -22,11 +23,12 @@ export const SETTING_KEYS = [
   "GOOGLE_CLIENT_SECRET",
   "APP_URL",
   "APP_PASSWORD",
+  "AI_FOOTAGE_MONTHLY_CAP_USD",
 ] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
 
 /** Settings shown in full on the Setup page; everything else is secret and only hinted at. */
-const PUBLIC_KEYS: SettingKey[] = ["APP_URL", "GOOGLE_CLIENT_ID", "EXTRA_AI_BASE_URL", "EXTRA_AI_MODEL"];
+const PUBLIC_KEYS: SettingKey[] = ["APP_URL", "GOOGLE_CLIENT_ID", "EXTRA_AI_BASE_URL", "EXTRA_AI_MODEL", "AI_FOOTAGE_MONTHLY_CAP_USD"];
 
 const FILE = path.join(DATA_DIR, "settings.json");
 
@@ -60,6 +62,12 @@ const EXPECTED: Partial<Record<SettingKey, { pattern: RegExp; name: string; box:
 
 /** Explains a key that was pasted into the wrong box, or undefined if it looks right. */
 export function wrongBox(key: SettingKey, value: string) {
+  // The AI footage budget is a dollar amount, not a key.
+  if (key === "AI_FOOTAGE_MONTHLY_CAP_USD") {
+    return !value || (Number.isFinite(Number(value.replace(/^\$/, ""))) && Number(value.replace(/^\$/, "")) >= 0)
+      ? undefined
+      : "The AI footage budget must be a number of dollars, like 40.";
+  }
   const expected = EXPECTED[key];
   if (!expected || !value || expected.pattern.test(value)) return undefined;
   const actual = LOOKS_LIKE.find(([pattern]) => pattern.test(value))?.[1];
@@ -76,7 +84,7 @@ export function wrongBox(key: SettingKey, value: string) {
 export function keyProblems() {
   return SETTING_KEYS.flatMap((key) => {
     const problem = wrongBox(key, process.env[key] ?? "");
-    return problem ? [`${EXPECTED[key]!.box}: ${problem}`] : [];
+    return problem ? [`${EXPECTED[key]?.box ?? key}: ${problem}`] : [];
   });
 }
 
@@ -120,13 +128,18 @@ export function saveSettings(values: Partial<Record<SettingKey, string>>) {
   write(saved);
 }
 
-/** What the Setup page may see: public values in full, secrets as "set" plus their last 4 characters. */
+/**
+ * What the Setup page may see: public values in full, secrets as "set" plus their last 4 characters.
+ * Also reports this month's AI footage spend (AI_FOOTAGE_SPENT_USD) for the budget card.
+ */
 export function describeSettings() {
-  return Object.fromEntries(
+  const settings = Object.fromEntries(
     SETTING_KEYS.map((key) => {
       const value = process.env[key] ?? "";
       if (PUBLIC_KEYS.includes(key)) return [key, { set: Boolean(value), value }];
       return [key, { set: Boolean(value), hint: value && key !== "APP_PASSWORD" ? `…${value.slice(-4)}` : "" }];
     }),
   );
+  const { spentUsd, capUsd, month } = budgetStatus();
+  return { ...settings, AI_FOOTAGE_SPENT_USD: { set: true, value: spentUsd.toFixed(2), cap: capUsd.toFixed(2), month } };
 }

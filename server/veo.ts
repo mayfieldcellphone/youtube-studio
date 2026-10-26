@@ -1,18 +1,23 @@
 import fs from "node:fs";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { budgetNote, budgetStatus, planBudget, PRICE_PER_SECOND, recordSpend, tierFor, type Tier } from "./aiBudget";
 
 /**
  * AI video clips from Google's Veo model (the engine behind Google Flow), through the same
  * Gemini API key used for the Gemini voice. Veo needs billing on the key.
+ *
+ * Cost control (see aiBudget.ts): the opening hook and key moments use the Fast model, filler
+ * shots use the cheaper Lite model, and nothing is generated once the monthly budget is spent.
  */
 
 const API = "https://generativelanguage.googleapis.com/v1beta";
 
-export type AiQuality = "fast" | "best";
+/** "fast" (the default) is the smart mix: Fast for the first three shots, Lite for the rest. */
+export type AiQuality = Tier;
 
-/** Rough list prices per second of video, for the cost estimate only. */
-export const PRICE_PER_SECOND: Record<AiQuality, number> = { fast: 0.15, best: 0.4 };
+/** Rough list prices per second of video, for the budget and the cost estimate only. */
+export { PRICE_PER_SECOND };
 export const CLIP_SECONDS = 8;
 
 const key = () => process.env.GEMINI_API_KEY ?? "";
@@ -50,16 +55,41 @@ function veoModels() {
   return models;
 }
 
+/** Forgets the cached model list (used by tests). */
+export function forgetModels() {
+  models = undefined;
+}
+
 const version = (name: string) => Number(/veo-(\d+(?:\.\d+)?)/.exec(name)?.[1] ?? 0);
 
-async function pickModel(quality: AiQuality) {
+export interface PickedModel {
+  model: string;
+  /** The tier this model really is, which can differ from the one asked for when it doesn't exist. */
+  tier: Tier;
+}
+
+/** Which tier to try next when the wanted one isn't offered: cheaper first, the dearest last. */
+const FALLBACKS: Record<Tier, Tier[]> = {
+  lite: ["lite", "fast", "best"],
+  fast: ["fast", "lite", "best"],
+  best: ["best", "fast", "lite"],
+};
+
+async function pickModel(wanted: Tier): Promise<PickedModel> {
   const list = await veoModels();
   if (!list.length) throw new Error("This Gemini key has no access to Veo video models.");
   const newest = version(list[0]);
   const candidates = list.filter((m) => version(m) === newest);
-  const fast = candidates.find((m) => /fast/i.test(m));
-  const full = candidates.find((m) => !/fast/i.test(m));
-  return (quality === "fast" ? fast ?? full : full ?? fast) ?? list[0];
+  const byTier: Record<Tier, string | undefined> = {
+    lite: candidates.find((m) => /lite/i.test(m)),
+    fast: candidates.find((m) => /fast/i.test(m)),
+    best: candidates.find((m) => !/fast|lite/i.test(m)),
+  };
+  for (const tier of FALLBACKS[wanted]) {
+    const model = byTier[tier];
+    if (model) return { model, tier };
+  }
+  return { model: list[0], tier: "fast" };
 }
 
 /** Starts a clip; returns the operation name to poll. */
@@ -127,6 +157,7 @@ export interface ClipRequest {
 /**
  * Makes several clips, two at a time. Returns, per request, true when the clip was made or
  * the reason it wasn't (so the caller can fall back to stock footage for that shot).
+ * Requests are in order of importance: the first is the opening hook.
  */
 export async function makeClips(
   requests: ClipRequest[],
@@ -134,24 +165,46 @@ export async function makeClips(
   portrait: boolean,
   onProgress: (done: number) => void,
 ): Promise<(true | string)[]> {
-  let model: string;
+  // Resolve the real model for each tier we might use (the cheapest is the budget's fallback).
+  const picked = new Map<Tier, PickedModel>();
   try {
-    model = await pickModel(quality);
+    const wanted = requests.map((_, i) => tierFor(quality, i));
+    for (const tier of new Set<Tier>([...wanted, "lite"])) picked.set(tier, await pickModel(tier));
   } catch (err) {
     return requests.map(() => `AI footage unavailable: ${(err as Error).message}`);
   }
+
+  // Plan the whole video against what is left of this month's budget.
+  const wanted = requests.map((_, i) => picked.get(tierFor(quality, i))!.tier);
+  const cheapest = picked.get("lite")!;
+  const plan = planBudget(wanted, CLIP_SECONDS, budgetStatus().remainingUsd, cheapest.tier);
+  const choice = plan.map((tier, i) =>
+    tier === null ? null : tier === wanted[i] ? picked.get(tierFor(quality, i))! : cheapest,
+  );
+  const cut = choice.filter((c) => c === null).length;
+  const stepped = choice.filter((c, i) => c && c.tier !== wanted[i]).length;
+  if (cut || stepped) console.log(`[AI footage] Budget: ${stepped} clip(s) moved to the cheaper model, ${cut} skipped.`);
+
   const results: (true | string)[] = new Array(requests.length);
   let next = 0;
   let done = 0;
   const worker = async () => {
     while (next < requests.length) {
       const i = next++;
-      try {
-        const op = await start(model, requests[i].prompt, portrait);
-        await finish(op, requests[i].outFile);
-        results[i] = true;
-      } catch (err) {
-        results[i] = (err as Error).message;
+      const pick = choice[i];
+      const cost = pick ? CLIP_SECONDS * PRICE_PER_SECOND[pick.tier] : 0;
+      // Checked again just before each clip: a long video shouldn't overshoot the budget.
+      if (!pick || budgetStatus().remainingUsd + 1e-9 < cost) {
+        results[i] = budgetNote();
+      } else {
+        try {
+          const op = await start(pick.model, requests[i].prompt, portrait);
+          await finish(op, requests[i].outFile);
+          recordSpend(cost, { tier: pick.tier, model: pick.model });
+          results[i] = true;
+        } catch (err) {
+          results[i] = (err as Error).message;
+        }
       }
       onProgress(++done);
     }
