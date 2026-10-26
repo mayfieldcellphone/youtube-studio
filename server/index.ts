@@ -9,8 +9,9 @@ import multer from "multer";
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { DATA_DIR, db, publicChannel, publicVideo, UPLOAD_DIR, WORK_DIR, type Video } from "./db";
-import { aiConfigured, generateIdeas, generateMetadata, generateScript, research, splitStoryIntoSeries, suggestCast } from "./ai";
+import { aiConfigured, extraAiConfigured, generateIdeas, generateMetadata, generateScript, research, splitStoryIntoSeries, suggestCast } from "./ai";
 import { createDesignedVoice, designVoice, footageConfigured, voiceCharactersLeft, voiceConfigured } from "./media";
+import { pixabayConfigured } from "./stockImages";
 import { engineReady, geminiConfigured, listVoices, previewVoice, voiceFor, type VoiceEngine } from "./voices";
 import { ffmpegAvailable, isRendering, recoverInterruptedRenders, startRender } from "./render";
 import { cancelPipeline, inPipeline, recoverInterruptedPipelines, startPipeline } from "./pipeline";
@@ -80,6 +81,8 @@ app.get("/api/status", (req, res) => {
     voice: voiceConfigured(),
     gemini: geminiConfigured(),
     footage: footageConfigured(),
+    pixabay: pixabayConfigured(),
+    extraAi: extraAiConfigured(),
     hedra: hedraConfigured(),
     ffmpeg: ffmpegAvailable(),
     keyProblems: loggedIn(req) ? keyProblems() : [],
@@ -174,7 +177,7 @@ function notAutomated(video: Video) {
 }
 
 function requireAi() {
-  if (!aiConfigured()) throw new HttpError(400, "Add your Claude (Anthropic) or Gemini (Google AI Studio) key on the Setup page to use AI features.");
+  if (!aiConfigured()) throw new HttpError(400, "Add your Claude (Anthropic), Gemini (Google AI Studio) or another AI key on the Setup page to use AI features.");
 }
 
 // ---------- Settings (keys entered on the Setup page) ----------
@@ -241,7 +244,7 @@ const channelInput = z.object({
   grade: z.enum(["none", "sepia", "desaturated"]).optional(),
   grain: z.boolean().optional(),
   letterbox: z.boolean().optional(),
-  visuals: z.enum(["stock", "pictures"]).optional(),
+  visuals: z.enum(["stock", "pictures", "free-first"]).optional(),
   pictureStyle: z.string().max(600).optional(),
   aiFootage: z.enum(["off", "hook", "key", "all"]).optional(),
   aiQuality: z.enum(["fast", "best"]).optional(),
@@ -677,7 +680,7 @@ app.post("/api/videos/:id/render", async (req, res) => {
   if (!video.script.trim()) throw new HttpError(400, "Write the script first.");
   const renderChannel = getChannel(video.channelId);
   const usesAiPictures = renderChannel.visuals === "pictures";
-  if (!footageConfigured() && !usesAiPictures) {
+  if (!footageConfigured() && !usesAiPictures && renderChannel.visuals !== "free-first") {
     throw new HttpError(400, "Add your Pexels key on the Setup page (box 3) for stock footage, or set Visuals to AI pictures under Edit channel.");
   }
   if (renderChannel.visuals === "pictures" && !geminiConfigured()) {
@@ -723,7 +726,7 @@ app.post("/api/pipeline", (req, res) => {
   if (stopAfter !== "script") {
     const needsStock = videos.some((v) => {
       const ch = db.channel(v.channelId);
-      return ch?.visuals !== "pictures";
+      return ch?.visuals !== "pictures" && ch?.visuals !== "free-first";
     });
     if (needsStock && !footageConfigured()) {
       throw new HttpError(400, "Add your Pexels key on the Setup page (box 3) for stock footage, or set Visuals to AI pictures under Edit channel.");

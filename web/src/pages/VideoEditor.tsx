@@ -424,7 +424,7 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
               {!renderRunning && (
                 <button
                   className="btn-primary"
-                  disabled={!!busy || !video.script.trim() || !(channel?.visuals === "pictures" ? status.gemini : status.footage)}
+                  disabled={!!busy || !video.script.trim() || !(channel?.visuals === "pictures" ? status.gemini : channel?.visuals === "free-first" || status.footage)}
                   onClick={() => {
                     if (!video.videoFile || confirm("Replace the current video file with a newly made one?")) ai("render", () => api.render(video.id));
                   }}
@@ -434,7 +434,7 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
                 </button>
               )}
             </div>
-            {!(channel?.visuals === "pictures" ? status.gemini : status.footage) && (
+            {!(channel?.visuals === "pictures" ? status.gemini : channel?.visuals === "free-first" || status.footage) && (
               <p className="mt-3 text-xs text-amber-300">
                 Needs {channel?.visuals === "pictures" ? "your Gemini key (for AI pictures)" : "your Pexels key (for stock footage)"}. See{" "}
                 <a className="underline" href="#/setup">Setup</a>.

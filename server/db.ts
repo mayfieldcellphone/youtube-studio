@@ -67,8 +67,8 @@ export interface Channel {
   grain?: boolean;
   /** 2.39:1 letterbox bars on horizontal videos */
   letterbox?: boolean;
-  /** Stock footage, or an AI picture drawn for every shot */
-  visuals?: "stock" | "pictures";
+  /** Stock footage, an AI picture for every shot, or free pictures first (Pexels, Pixabay, Wikimedia) with AI only for shots they miss */
+  visuals?: "stock" | "pictures" | "free-first";
   /** How AI pictures should look; empty uses a style that fits the look */
   pictureStyle?: string;
   /** Which shots are made with Google Veo AI video instead of stock footage */

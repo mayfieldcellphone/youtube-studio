@@ -9,7 +9,8 @@ import { planScenes } from "./ai";
 import { download, findFootage, voiceConfigured, type Footage, type Word } from "./media";
 import { finishingFilters } from "./finishing";
 import { AMBIENCE_GAIN_DB, finalAudioGraph, generateSound, makeStinger, mixBed, musicGainExpression, SFX_GAIN_DB, STINGER_GAIN_DB, timedCues, type BedItem, type TimedCue } from "./soundDesign";
-import { synthesizeScenes, voiceFor, type CharacterLine } from "./voices";
+import { geminiConfigured, synthesizeScenes, voiceFor, type CharacterLine } from "./voices";
+import { findFreeVisual } from "./stockImages";
 import { masterVoice } from "./audioPost";
 import { resolvePresets } from "./voicePresets";
 import { castVoice, NARRATOR } from "./speakers";
@@ -205,6 +206,10 @@ async function render(videoId: string) {
     // 3c. Stock footage for every other shot, never reusing a clip within the video.
     const used = new Set<string>();
     const visuals: (Visual | null)[] = [];
+    // "Free pictures first": Pexels, Pixabay and Wikimedia are tried before any paid AI picture.
+    const freeFirst = channel.visuals === "free-first";
+    const brokenSources = new Set<string>();
+    const needAi: number[] = [];
     for (const [i, shot] of shots.entries()) {
       if (shot.fixed) {
         visuals.push(shot.fixed);
@@ -221,9 +226,12 @@ async function render(videoId: string) {
         continue;
       }
       stage(`Finding footage (${i + 1}/${shots.length})`, 47 + (8 * i) / shots.length);
-      const found = (await findFootage(shot.query, portrait, used)) ?? (await findFootage(shot.fallback, portrait, used));
+      const found = freeFirst
+        ? await findFreeVisual([shot.query, shot.fallback], portrait, used, brokenSources)
+        : (await findFootage(shot.query, portrait, used)) ?? (await findFootage(shot.fallback, portrait, used));
       if (!found) {
         visuals.push(null);
+        if (freeFirst) needAi.push(i);
         continue;
       }
       used.add(found.id);
@@ -233,7 +241,31 @@ async function render(videoId: string) {
         visuals.push({ ...found, file });
       } catch {
         visuals.push(null);
+        if (freeFirst) needAi.push(i);
       }
+    }
+
+    // 3d. Free sources had nothing for these shots: draw an AI picture for each, if Gemini is set up.
+    if (needAi.length && geminiConfigured()) {
+      const label = (done: number) => `Drawing AI pictures for shots with no free match (${done}/${needAi.length})`;
+      stage(label(0), 52);
+      const style = channel.pictureStyle?.trim() || DEFAULT_PICTURE_STYLES[video.variation?.look ?? channel.look ?? "clean"];
+      const results = await makePictures(
+        needAi.map((i) => ({ prompt: shots[i].picture, outBase: path.join(work, `picture-${i}`) })),
+        style,
+        portrait,
+        (done) => stage(label(done), 52 + (3 * done) / needAi.length),
+      );
+      let drawn = 0;
+      results.forEach((result, k) => {
+        if (typeof result === "string") return;
+        visuals[needAi[k]] = { id: `picture-${needAi[k]}`, kind: "photo", url: "", file: result.file };
+        pictureFiles.set(needAi[k], result.file);
+        drawn++;
+      });
+      notes.push(`${drawn} of ${needAi.length} shots had no free picture, so AI pictures were drawn for them.`);
+    } else if (needAi.length) {
+      notes.push(`${needAi.length} shots had no free picture match and no Gemini key is set, so they show a blank frame.`);
     }
 
     // 4. Edit each shot: crop to fit, slow camera movement, color grade.

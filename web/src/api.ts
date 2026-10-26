@@ -28,7 +28,7 @@ export interface Channel {
   grade?: "none" | "sepia" | "desaturated";
   grain?: boolean;
   letterbox?: boolean;
-  visuals?: "stock" | "pictures";
+  visuals?: "stock" | "pictures" | "free-first";
   pictureStyle?: string;
   aiFootage?: "off" | "hook" | "key" | "all";
   aiQuality?: "fast" | "best";
@@ -137,6 +137,10 @@ export type SettingKey =
   | "ELEVENLABS_API_KEY"
   | "GEMINI_API_KEY"
   | "PEXELS_API_KEY"
+  | "PIXABAY_API_KEY"
+  | "EXTRA_AI_BASE_URL"
+  | "EXTRA_AI_API_KEY"
+  | "EXTRA_AI_MODEL"
   | "HEDRA_API_KEY"
   | "GOOGLE_CLIENT_ID"
   | "GOOGLE_CLIENT_SECRET"
@@ -156,6 +160,8 @@ export interface Status {
   gemini: boolean;
   keyProblems: string[];
   footage: boolean;
+  pixabay: boolean;
+  extraAi: boolean;
   hedra: boolean;
   ffmpeg: boolean;
   redirectUri: string;
