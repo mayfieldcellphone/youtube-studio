@@ -764,6 +764,11 @@ export default function ChannelBoard({ channelId, params }: { channelId: string;
                             {v.scheduledAt && ["scheduled", "published"].includes(v.status) && (
                               <span className="text-pink-300">{formatDateTime(v.scheduledAt)}</span>
                             )}
+                            {v.analytics?.flag && (
+                              <span className="text-amber-300 font-semibold" title={v.analytics.note}>
+                                ⚠ {v.analytics.averageViewPercentage.toFixed(0)}% viewed: rewrite hook
+                              </span>
+                            )}
                             {v.stats && (
                               <span className="inline-flex items-center gap-1 text-emerald-400">
                                 <Eye className="h-3 w-3" /> {compact(v.stats.views)}

@@ -185,7 +185,7 @@ async function render(videoId: string) {
       const wanted = shots.flatMap((s, i) => (aiFiles.has(i) || s.fixed ? [] : [i]));
       const label = (done: number) => `Drawing AI pictures (${done}/${wanted.length})`;
       stage(label(0), 41);
-      const style = channel.pictureStyle?.trim() || DEFAULT_PICTURE_STYLES[channel.look ?? "clean"];
+      const style = channel.pictureStyle?.trim() || DEFAULT_PICTURE_STYLES[video.variation?.look ?? channel.look ?? "clean"];
       const results = await makePictures(
         wanted.map((i) => ({ prompt: shots[i].picture, outBase: path.join(work, `picture-${i}`) })),
         style,
@@ -237,7 +237,7 @@ async function render(videoId: string) {
     }
 
     // 4. Edit each shot: crop to fit, slow camera movement, color grade.
-    const look = [LOOKS[channel.look ?? "clean"], ...finishingFilters(channel, W, H)].join(",");
+    const look = [LOOKS[video.variation?.look ?? channel.look ?? "clean"], ...finishingFilters(channel, W, H)].join(",");
     const segments: string[] = [];
     for (const [i, shot] of shots.entries()) {
       stage(`Editing shots (${i + 1}/${shots.length})`, 55 + (25 * i) / shots.length);
@@ -332,6 +332,7 @@ async function render(videoId: string) {
     const previous = video.videoFile;
     db.updateVideo(videoId, {
       videoFile: { path: output, name: `${slug(video.title)}.mp4`, size, mimeType: "video/mp4" },
+      durationSeconds: Math.round(total),
       status: ["idea", "scripted"].includes(video.status) ? "ready" : video.status,
       // Realistic AI video, pictures and character voices all need YouTube's altered/synthetic content label.
       aiFootageUsed: aiFiles.size > 0 || pictureFiles.size > 0 || characters.some(Boolean),

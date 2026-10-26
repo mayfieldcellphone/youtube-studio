@@ -13,6 +13,12 @@ export interface Channel {
   postingDays: number[];
   postingTime: string;
   categoryId: string;
+  /** History's Shadows rules apply to "history"; Heartbeat Hunt uploads need a "drama" channel */
+  lane?: "history" | "drama";
+  timeZone?: string;
+  shortTime?: string;
+  longTime?: string;
+  longDay?: number;
   voiceEngine?: VoiceEngine;
   voiceId?: string;
   voiceStyle?: string;
@@ -106,6 +112,12 @@ export interface Video {
   scheduledAt?: string;
   youtubeVideoId?: string;
   error?: string;
+  series?: string;
+  seriesSubject?: string;
+  lane?: "history" | "drama";
+  variation?: { intro: string; outro: string; look: string; assignedAt: string };
+  durationSeconds?: number;
+  analytics?: { views: number; averageViewPercentage: number; subscribersGained: number; pulledAt: string; final?: boolean; flag?: "rewrite-hook"; note?: string; error?: string };
   stats?: { views: number; likes: number; comments: number; updatedAt: string };
   createdAt: string;
   updatedAt: string;
@@ -199,9 +211,10 @@ export const api = {
   videos: (channelId?: string) =>
     request<Video[]>("GET", channelId ? `/api/videos?channelId=${channelId}` : "/api/videos"),
   video: (id: string) => request<Video>("GET", `/api/videos/${id}`),
-  createVideo: (v: { channelId: string; title: string; format: VideoFormat }) =>
+  createVideo: (v: { channelId: string; title: string; format: VideoFormat; series?: string }) =>
     request<Video>("POST", "/api/videos", v),
-  updateVideo: (id: string, v: Partial<Omit<Video, "scheduledAt">> & { scheduledAt?: string | null }) =>
+  nextSlot: (id: string) => request<{ scheduledAt: string }>("GET", `/api/videos/${id}/next-slot`),
+  updateVideo: (id: string, v: Partial<Omit<Video, "scheduledAt" | "series" | "seriesSubject" | "lane">> & { scheduledAt?: string | null; series?: string | null; seriesSubject?: string | null; lane?: "history" | "drama" | null }) =>
     request<Video>("PATCH", `/api/videos/${id}`, v),
   deleteVideo: (id: string) => request("DELETE", `/api/videos/${id}`),
   research: (id: string) => request<Video>("POST", `/api/videos/${id}/research`),

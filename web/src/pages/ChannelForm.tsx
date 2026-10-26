@@ -161,6 +161,14 @@ export default function ChannelForm({ channelId }: { channelId?: string }) {
             <input value={form.language} onChange={(e) => set("language", e.target.value)} />
           </Field>
         </div>
+        <Field label="Content line">
+          <select value={form.lane ?? ""} onChange={(e) => set("lane", (e.target.value || undefined) as never)}>
+            <option value="">Automatic (from the channel name)</option>
+            <option value="history">History (History's Shadows upload rules apply)</option>
+            <option value="drama">Drama (Heartbeat Hunt)</option>
+          </select>
+          <p className="muted mt-1">History channels post 1 Short a day and 1 long video a week at {form.shortTime ?? "19:00"} {form.timeZone ?? "Australia/Sydney"}. Heartbeat Hunt videos only upload to a drama channel.</p>
+        </Field>
         <Field label="YouTube category">
           <select value={form.categoryId} onChange={(e) => set("categoryId", e.target.value)}>
             {CATEGORIES.map(([id, name]) => (

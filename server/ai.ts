@@ -3,6 +3,25 @@ import type { Channel, Research, Video } from "./db";
 import { google } from "./veo";
 import { allCast, NARRATOR, parseLine, scriptSpeakers, speakerKey } from "./speakers";
 import { anchorCues, prepareScript } from "./screenplay";
+import { db } from "./db";
+import {
+  buildDescription,
+  buildTags,
+  checkShortScript,
+  finalTitle,
+  INTRO_STYLES,
+  isHistoryChannel,
+  OUTRO_STYLES,
+  pickVariation,
+  SERIES,
+  SHORT_DEFAULT_SECONDS,
+  SHORT_DEFAULT_WORDS,
+  SHORT_MAX_SECONDS,
+  SHORT_MAX_WORDS,
+  SHORT_TITLE_MAX,
+  spokenLines,
+  type Variation,
+} from "./policy";
 
 /** Current Claude model. If it declines a request, the API retries on Anthropic's recommended fallback model. */
 const CLAUDE_MODEL = "claude-opus-5-5";
@@ -51,7 +70,8 @@ function channelBrief(channel: Channel) {
 
 function videoBrief(video: Video) {
   return [
-    `Format: ${video.format === "short" ? "YouTube Short (vertical, under 60 seconds)" : "Long-form video (8-12 minutes)"}`,
+    `Format: ${video.format === "short" ? `YouTube Short (vertical, ${SHORT_DEFAULT_SECONDS} seconds, never over ${SHORT_MAX_SECONDS})` : "Long-form video (6-10 minutes)"}`,
+    video.series && `Series: ${video.series}`,
     `Working title: ${video.title}`,
     video.hook && `Hook idea: ${video.hook}`,
     video.angle && `Angle: ${video.angle}`,
@@ -304,9 +324,21 @@ Write plain-text notes: 12-20 topic opportunities, one per line, each with the s
 }
 
 /** Techniques that keep viewers watching; shared by the writer and the editor pass. */
-function scriptCraft(video: Video) {
-  const shape =
-    video.format === "short"
+function scriptCraft(video: Video, variation?: Variation) {
+  const intro = INTRO_STYLES.find((i) => i.id === variation?.intro);
+  const outro = OUTRO_STYLES.find((o) => o.id === variation?.outro);
+  const strictShort = video.format === "short" && Boolean(intro && outro);
+  const shape = strictShort
+    ? `SHORT (vertical, ${SHORT_DEFAULT_SECONDS} seconds by default, about ${SHORT_DEFAULT_WORDS} spoken words; go up to ${SHORT_MAX_SECONDS} seconds / ${SHORT_MAX_WORDS} words only when the story needs it, never beyond):
+- Line 1 is the surprising claim, in 9 words or fewer, so it lands in the first 2 seconds. It is NOT a greeting: no "Hey", "Welcome", "Today", "In this video", "Did you know", no question, no scene-setting. It must make sense to someone who knows nothing about the story and open a question they need answered.
+- Opening style for this video: ${intro!.brief}
+- Follow ONE thread. A Short has room for one mystery and one payoff; cut side details, however interesting.
+- Every following sentence adds new information or raises the stakes. Cut anything that repeats or explains the obvious.
+- Halfway through, re-hook with a line that raises a new question ("But the note in his pocket was stranger.").
+- Build to one twist or reveal near the end.
+- The second-to-last spoken line is the spoken subscribe prompt, in these words or very close to them: "${outro!.subscribe}"
+- The LAST spoken line loops back to line 1: ${outro!.brief} It must reuse at least two key words from line 1, must not contain the word "subscribe", and nothing comes after it.`
+    : video.format === "short"
       ? `SHORT (vertical, 35-55 seconds, about 110-140 spoken words):
 - Line 1 is the hook: the single most surprising, specific detail, stated in under 12 words. It must make sense instantly to someone who knows nothing about the story, and open a question they need answered. No scene-setting, no "Did you know", no question as the opener.
 - Follow ONE thread. A Short has room for one mystery and one payoff; cut side details, however interesting.
@@ -314,7 +346,7 @@ function scriptCraft(video: Video) {
 - Halfway through, re-hook with a line that raises a new question ("But the note in his pocket was stranger.").
 - Build to one twist or reveal near the end.
 - The last line should connect back to the first so the Short loops smoothly. No "subscribe for more" (a 3-word CTA at most, or none).`
-      : `LONG VIDEO (8-11 minutes, about 1,300-1,700 spoken words):
+      : `LONG VIDEO (6-10 minutes, about 950-1,550 spoken words):
 - Cold open (first 20-30 seconds): drop straight into the most dramatic moment of the story, then cut away with a question the video will answer.
 - Promise: one sentence on what the viewer will know by the end.
 - 3-5 chapters. Each chapter reveals something new and ends on an open loop or cliffhanger that pulls into the next ("But that wasn't the strangest part.").
@@ -374,18 +406,40 @@ Rules for characters:
 }
 
 export async function generateScript(channel: Channel, video: Video) {
+  const history = isHistoryChannel(channel);
+  // Each script comes from its own research notes, never a reused template.
+  if (history && !video.research?.notes?.trim()) {
+    throw new Error("Run research on this video first: every script on this channel is written from its own research notes.");
+  }
   const research = video.research
     ? `\nResearch notes (base every fact on these; say "reportedly" or "some believe" for anything marked Disputed or Theory, and respect the CAUTION section):\n${video.research.notes}\n`
     : "";
+
+  // A fresh intro style, outro style and visual look, different from the neighbouring uploads.
+  let variation: Variation | undefined;
+  let avoid = "";
+  if (history) {
+    variation = pickVariation(db.videos(), video);
+    db.updateVideo(video.id, { variation });
+    const recent = db
+      .videos(video.channelId)
+      .filter((v) => v.id !== video.id && v.script.trim())
+      .sort((x, y) => y.updatedAt.localeCompare(x.updatedAt))
+      .slice(0, 6)
+      .map((v) => `- ${spokenLines(v.script)[0] ?? ""}`)
+      .join("\n");
+    if (recent) avoid = `\nOpening lines of the channel's recent videos. Do not echo their wording or sentence shape:\n${recent}\n`;
+  }
+  const craft = scriptCraft(video, variation);
 
   const draft = await generate<{ script: string }>(
     `${channelBrief(channel)}
 
 ${videoBrief(video)}
-${research}
+${research}${avoid}
 Write the full narration script for this video, ready to be read aloud by a voiceover.
 
-${scriptCraft(video)}${castCraft(channel, video)}`,
+${craft}${castCraft(channel, video)}`,
     obj({ script: str("The complete script") }),
   );
 
@@ -404,10 +458,37 @@ Judge it as a viewer scrolling at midnight: would they stop at line 1, and still
 Then rewrite the whole script to fix them. Keep every fact accurate, keep it the right length, and make every line earn its place. If the script uses screenplay tags ([NARRATOR], [NAME | emotion], [SFX: ...], [MUSIC: ...], [PAUSE: ...], [SOURCE: ...]), keep that exact format on every line.
 
 The standard it must meet:
-${scriptCraft(video)}${castCraft(channel, video)}`,
+${craft}${castCraft(channel, video)}`,
     obj({ problems: str("Short list of what was wrong"), script: str("The improved complete script") }),
   );
-  return edited.script;
+  let script = edited.script;
+
+  // Shorts on this channel must pass the hard rules (claim first, subscribe prompt, loop, length).
+  if (history && video.format === "short") {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const problems = checkShortScript(script);
+      if (!problems.length) break;
+      const fixed = await generate<{ script: string }>(
+        `${channelBrief(channel)}
+
+${videoBrief(video)}
+${research}
+This Short script breaks the channel's rules:
+${problems.map((p) => `- ${p}`).join("\n")}
+
+Script:
+${script}
+
+Rewrite it so every rule is met, keeping the facts and the story. Rules:
+${craft}${castCraft(channel, video)}`,
+        obj({ script: str("The corrected complete script") }),
+      );
+      script = fixed.script;
+    }
+    const left = checkShortScript(script);
+    if (left.length) console.warn(`Script for "${video.title}" still breaks rules after two fixes: ${left.join(" ")}`);
+  }
+  return script;
 }
 
 export interface SuggestedCharacter {
@@ -468,9 +549,14 @@ export interface Metadata {
   titles: string[];
   description: string;
   tags: string[];
+  /** 3-5 topic-specific tags (History's Shadows rules) */
+  topicTags?: string[];
+  /** Main subject of the video, used in series titles */
+  subject?: string;
 }
 
-export async function generateMetadata(channel: Channel, video: Video) {
+export async function generateMetadata(channel: Channel, video: Video): Promise<Metadata> {
+  if (isHistoryChannel(channel)) return generateHistoryMetadata(channel, video);
   const prompt = `${channelBrief(channel)}
 
 ${videoBrief(video)}
@@ -491,6 +577,47 @@ Write the YouTube upload details for this video:
     description: str("Full video description"),
     tags: { type: "array", items: str("Tag without #") },
   }));
+}
+
+/** History's Shadows: the AI writes only the creative parts; code applies the fixed template. */
+async function generateHistoryMetadata(channel: Channel, video: Video): Promise<Metadata> {
+  const short = video.format === "short";
+  const def = Object.entries(SERIES).find(([name]) => name.toLowerCase() === (video.series ?? "").toLowerCase())?.[1];
+  const prompt = `${channelBrief(channel)}
+
+${videoBrief(video)}
+${video.script ? `\nScript:\n${video.script}` : ""}
+
+Write the YouTube upload details for this video:
+- 5 title options, each under ${short ? SHORT_TITLE_MAX + 1 : 70} characters, honest to the video, search keyword near the start where it reads naturally.${
+    def?.title ? `\n- This video is part of the "${video.series}" series. Every title must follow exactly: ${def.title("[Name]")}. Put the subject's name in place of [Name].` : ""
+  }
+- subject: the main person, object or event the video is about, as a short name (used in series titles).
+- hook: ONE line (under 110 characters) that opens the description. A concrete, true claim from the video. No hashtags, no emoji.
+- topicTags: 3-5 tags specific to THIS video (people, objects, places, events), lower case, no #. Do not repeat generic tags like "history" or "unsolved mysteries".`;
+
+  const res = await generate<{ titles: string[]; subject: string; hook: string; topicTags: string[] }>(
+    prompt,
+    obj({
+      titles: { type: "array", items: str("Title option") },
+      subject: str("Main subject, short name"),
+      hook: str("One-line description hook"),
+      topicTags: { type: "array", items: str("Topic tag without #") },
+    }),
+  );
+  const subject = res.subject?.trim() || undefined;
+  const base = { ...video, seriesSubject: video.seriesSubject || subject };
+  const titles = [...new Set(res.titles.map((t) => finalTitle({ ...base, title: t })))];
+  const topicTags = res.topicTags.slice(0, 5);
+  // Persisted by the caller; the description and tags here are what will be uploaded.
+  const merged = { ...base, description: res.hook, topicTags, tags: [] as string[] };
+  return {
+    titles,
+    subject,
+    topicTags,
+    description: buildDescription(merged, [], true),
+    tags: buildTags(merged),
+  };
 }
 
 export interface Scene {

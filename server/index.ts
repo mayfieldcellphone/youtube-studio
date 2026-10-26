@@ -14,7 +14,8 @@ import { createDesignedVoice, designVoice, footageConfigured, voiceCharactersLef
 import { engineReady, geminiConfigured, listVoices, previewVoice, voiceFor, type VoiceEngine } from "./voices";
 import { ffmpegAvailable, isRendering, recoverInterruptedRenders, startRender } from "./render";
 import { cancelPipeline, inPipeline, recoverInterruptedPipelines, startPipeline } from "./pipeline";
-import { authUrl, completeAuth, redirectUri, revokeAccess, syncChannel, uploadAndSchedule, youtubeConfigured } from "./youtube";
+import { authUrl, completeAuth, pullDueAnalytics, redirectUri, revokeAccess, syncChannel, uploadAndSchedule, youtubeConfigured } from "./youtube";
+import { assertLaneMatches, assertSlotFree, isHistoryChannel, nextSlot as policySlot } from "./policy";
 import { privacyPage, termsPage } from "./legal";
 import { hedraConfigured } from "./hedra";
 import { ensurePortrait, portraitFile } from "./portraits";
@@ -227,6 +228,11 @@ const channelInput = z.object({
   postingDays: z.array(z.number().int().min(0).max(6)).default([1, 3, 5]),
   postingTime: z.string().regex(/^\d{2}:\d{2}$/).default("17:00"),
   categoryId: z.string().regex(/^\d+$/).default("22"),
+  lane: z.enum(["history", "drama"]).optional(),
+  timeZone: z.string().max(60).refine((tz) => { try { new Intl.DateTimeFormat("en", { timeZone: tz }); return true; } catch { return false; } }, "Unknown time zone.").optional(),
+  shortTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+  longTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+  longDay: z.number().int().min(0).max(6).optional(),
   voiceEngine: z.enum(["elevenlabs", "gemini", "kokoro"]).optional(),
   voiceId: z.string().max(100).optional(),
   voiceStyle: z.string().max(600).optional(),
@@ -342,9 +348,15 @@ app.post("/api/videos", (req, res) => {
       channelId: z.string(),
       title: z.string().trim().min(1).max(200),
       format: z.enum(["short", "long"]).default("short"),
+      series: z.string().trim().max(100).optional(),
     })
     .parse(req.body);
-  getChannel(input.channelId);
+  const target = getChannel(input.channelId);
+  try {
+    assertLaneMatches({ ...input, keyword: "" } as never, target);
+  } catch (err) {
+    throw new HttpError(400, (err as Error).message);
+  }
   res.json(publicVideo(db.createVideo(input)));
 });
 
@@ -400,6 +412,11 @@ const videoPatch = z
     description: z.string().max(5000),
     tags: z.array(z.string().max(100)).max(50),
     scheduledAt: z.string().datetime({ offset: true }).nullable(),
+    series: z.string().trim().max(100).nullable(),
+    seriesSubject: z.string().trim().max(100).nullable(),
+    lane: z.enum(["history", "drama"]).nullable(),
+    /** Move the video to another channel (blocked if it belongs to a different lane) */
+    channelId: z.string(),
   })
   .partial();
 
@@ -409,8 +426,28 @@ app.patch("/api/videos/:id", (req, res) => {
   if (video.youtubeVideoId && (patch.title !== undefined || patch.scheduledAt !== undefined)) {
     throw new HttpError(400, "This video is already on YouTube. Edit it in YouTube Studio.");
   }
-  const { scheduledAt, ...rest } = patch;
-  res.json(publicVideo(db.updateVideo(video.id, { ...rest, ...(scheduledAt !== undefined && { scheduledAt: scheduledAt ?? undefined }) })!));
+  const { scheduledAt, series, seriesSubject, lane, channelId, ...rest } = patch;
+  if (channelId !== undefined && channelId !== video.channelId) {
+    if (video.youtubeVideoId) throw new HttpError(400, "This video is already on YouTube, so it can't move to another channel.");
+    const target = getChannel(channelId);
+    try {
+      assertLaneMatches({ ...video, ...(series !== undefined && { series: series ?? undefined }), ...(lane !== undefined && { lane: lane ?? undefined }) }, target);
+    } catch (err) {
+      throw new HttpError(400, (err as Error).message);
+    }
+  }
+  res.json(
+    publicVideo(
+      db.updateVideo(video.id, {
+        ...rest,
+        ...(channelId !== undefined && { channelId }),
+        ...(scheduledAt !== undefined && { scheduledAt: scheduledAt ?? undefined }),
+        ...(series !== undefined && { series: series ?? undefined }),
+        ...(seriesSubject !== undefined && { seriesSubject: seriesSubject ?? undefined }),
+        ...(lane !== undefined && { lane: lane ?? undefined }),
+      })!,
+    ),
+  );
 });
 
 app.delete("/api/videos/:id", (req, res) => {
@@ -419,6 +456,19 @@ app.delete("/api/videos/:id", (req, res) => {
   res.json({ ok: true });
 });
 
+/** The next free publish slot for this video under the channel's schedule rules. */
+app.get("/api/videos/:id/next-slot", (req, res) => {
+  const video = getVideo(req.params.id);
+  const channel = getChannel(video.channelId);
+  if (!isHistoryChannel(channel)) throw new HttpError(400, "This channel doesn't use automatic daily slots.");
+  res.json({ scheduledAt: policySlot(channel, video, db.videos()).toISOString() });
+});
+
+/** Shorts under 40% average viewed, whose hook style should be rewritten. */
+app.get("/api/analytics/flags", (_req, res) => {
+  res.json(db.videos().filter((v) => v.analytics?.flag).map(publicVideo));
+});
+ 
 app.post("/api/videos/:id/script", async (req, res) => {
   requireAi();
   const video = getVideo(req.params.id);
@@ -551,6 +601,8 @@ app.post("/api/videos/:id/metadata", async (req, res) => {
         titleOptions: meta.titles,
         description: meta.description,
         tags: meta.tags,
+        ...(meta.topicTags && { topicTags: meta.topicTags }),
+        ...(meta.subject && !video.seriesSubject && { seriesSubject: meta.subject }),
       })!,
     ),
   );
@@ -783,7 +835,14 @@ app.post("/api/videos/:id/publish", (req, res) => {
   notAutomated(video);
   if (isRendering(video.id)) throw new HttpError(409, "Wait until the video maker has finished.");
   if (!video.videoFile) throw new HttpError(400, "Upload the video file first.");
-  if (!db.channel(video.channelId)?.youtube) throw new HttpError(400, "Connect this channel to YouTube first.");
+  const target = db.channel(video.channelId);
+  if (!target?.youtube) throw new HttpError(400, "Connect this channel to YouTube first.");
+  try {
+    assertLaneMatches(video, target);
+    if (isHistoryChannel(target)) assertSlotFree(target, video, db.videos());
+  } catch (err) {
+    throw new HttpError(400, (err as Error).message);
+  }
 
   // Large uploads take minutes, so run in the background; the browser polls the video.
   uploading.add(video.id);
@@ -910,6 +969,7 @@ if (PROD) {
 async function syncAllChannels() {
   for (const channel of db.channels().filter((c) => c.youtube)) {
     await syncChannel(channel).catch((err: Error) => console.error(`Syncing ${channel.name} with YouTube failed: ${err.message}`));
+    await pullDueAnalytics(db.channel(channel.id)!).catch((err: Error) => console.error(`Pulling analytics for ${channel.name} failed: ${err.message}`));
   }
 }
 setInterval(syncAllChannels, 30 * 60 * 1000).unref();

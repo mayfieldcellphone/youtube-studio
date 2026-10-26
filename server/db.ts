@@ -3,6 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import type { CharacterFx } from "./characterFx";
 import type { PresetId, VoicePreset } from "./voicePresets";
+import type { Lane, Variation } from "./policy";
 
 export const DATA_DIR = path.resolve(process.env.DATA_DIR ?? "data");
 export const UPLOAD_DIR = path.join(DATA_DIR, "uploads");
@@ -36,6 +37,18 @@ export interface Channel {
   /** "HH:MM" in the browser's local time */
   postingTime: string;
   categoryId: string;
+  /** Which content line this channel carries; unset = guessed from the name (see policy.ts) */
+  lane?: Lane;
+  /** IANA time zone for scheduling (default Australia/Sydney) */
+  timeZone?: string;
+  /** "HH:MM" daily Short slot in timeZone (default 19:00) */
+  shortTime?: string;
+  /** "HH:MM" weekly long-video slot in timeZone (default 19:00) */
+  longTime?: string;
+  /** Day of the week for the weekly long video, 0 = Sunday … 6 = Saturday (default Saturday) */
+  longDay?: number;
+  /** YouTube playlist IDs this app created or found, by series name */
+  playlists?: Record<string, string>;
   /** Narration engine; unset means the first one that's set up */
   voiceEngine?: "elevenlabs" | "gemini" | "kokoro";
   /** Voice within the engine */
@@ -133,6 +146,19 @@ export interface PipelineJob {
   finishedAt?: string;
 }
 
+export interface VideoAnalytics {
+  views: number;
+  averageViewPercentage: number;
+  subscribersGained: number;
+  pulledAt: string;
+  /** No more refreshes: the video is past the freeze age */
+  final?: boolean;
+  /** A Short under 40% average viewed: its hook style should be rewritten */
+  flag?: "rewrite-hook";
+  note?: string;
+  error?: string;
+}
+
 export interface Video {
   id: string;
   channelId: string;
@@ -152,6 +178,22 @@ export interface Video {
   /** The last made video has dramatised scenes voiced by AI characters (disclosed on upload). */
   characterVoicesUsed?: boolean;
   pipeline?: PipelineJob;
+  /** Series name, e.g. "Hogwarts vs History"; uploads are added to a playlist of this name */
+  series?: string;
+  /** Series subject used in the series title, e.g. "Nicolas Flamel" */
+  seriesSubject?: string;
+  /** Overrides the lane guessed from the series/title (see policy.ts) */
+  lane?: Lane;
+  /** AI-suggested topic tags (3-5), added to the fixed channel tags on upload */
+  topicTags?: string[];
+  /** Intro, outro and visual look chosen to differ from the neighbouring uploads */
+  variation?: Variation;
+  /** Length of the made video in seconds */
+  durationSeconds?: number;
+  /** YouTube Analytics numbers pulled 48 hours after publishing */
+  analytics?: VideoAnalytics;
+  /** The YouTube playlist the video was added to */
+  playlistId?: string;
   titleOptions: string[];
   description: string;
   tags: string[];

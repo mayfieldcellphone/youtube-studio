@@ -61,6 +61,11 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
   // Suggest the channel's next free posting slot.
   useEffect(() => {
     if (!video || !channel || when) return;
+    if (!video.scheduledAt && !video.youtubeVideoId && channel.lane === "history") {
+      // History's Shadows: 1 Short a day / 1 long video a week at the Sydney time, worked out by the server.
+      api.nextSlot(video.id).then((r) => setWhen(toLocalInput(new Date(r.scheduledAt)))).catch(() => {});
+      return;
+    }
     const others = allVideos.filter((v) => v.id !== video.id);
     setWhen(toLocalInput(video.scheduledAt && !video.youtubeVideoId ? new Date(video.scheduledAt) : nextSlot(channel, others)));
   }, [video, channel, allVideos, when]);
@@ -218,6 +223,47 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
           <Labeled label="Angle">
             <textarea rows={3} value={draft.angle} onChange={set("angle")} onBlur={save("angle")} />
           </Labeled>
+          <Labeled label="Series (optional)">
+            <input
+              list="series-names"
+              defaultValue={video.series ?? ""}
+              placeholder="e.g. Hogwarts vs History"
+              disabled={onYouTube}
+              onBlur={(e) => {
+                const v = e.target.value.trim();
+                if (v !== (video.series ?? "")) run("save", async () => apply(await api.updateVideo(video.id, { series: v || null })));
+              }}
+            />
+            <datalist id="series-names">
+              <option value="Hogwarts vs History" />
+              <option value="Heartbeat Hunt" />
+            </datalist>
+            <p className="mt-1 text-xs text-zinc-500">
+              Each upload is added to a YouTube playlist with this name. "Hogwarts vs History" titles read "The Real [Name]: What Harry Potter Got Wrong".
+            </p>
+          </Labeled>
+          <Labeled label="Upload to channel">
+            <select
+              value={video.channelId}
+              disabled={onYouTube}
+              onChange={(e) => run("save", async () => apply(await api.updateVideo(video.id, { channelId: e.target.value })))}
+            >
+              {channels.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-zinc-500">
+              Heartbeat Hunt videos can only go to the Heartbeat Hunt channel, and history videos can't go there.
+            </p>
+          </Labeled>
+          {video.analytics && !video.analytics.error && (
+            <p className={`text-sm ${video.analytics.flag ? "text-amber-300" : "text-zinc-400"}`}>
+              After 48 hours: {video.analytics.views.toLocaleString()} views · {video.analytics.averageViewPercentage.toFixed(0)}% average viewed · +{video.analytics.subscribersGained} subscribers
+              {video.analytics.flag && video.analytics.note ? ` — ${video.analytics.note}` : ""}
+            </p>
+          )}
           <Labeled label="Search keyword">
             <input value={draft.keyword} onChange={set("keyword")} onBlur={save("keyword")} />
             <p className="mt-1 text-xs text-zinc-500">Tip: type it into YouTube search to check people look for it.</p>
