@@ -145,7 +145,8 @@ export type SettingKey =
   | "GOOGLE_CLIENT_ID"
   | "GOOGLE_CLIENT_SECRET"
   | "APP_URL"
-  | "APP_PASSWORD";
+  | "APP_PASSWORD"
+  | "AI_FOOTAGE_MONTHLY_CAP_USD";
 export type Settings = Record<SettingKey, { set: boolean; hint?: string; value?: string }>;
 
 export interface Status {

@@ -3,6 +3,7 @@ import { Check, Copy, X } from "lucide-react";
 import { api, type PresetId, type SettingKey, type Settings, type Voice, type VoicePreset, type VoicePreview } from "../api";
 import { useApp } from "../App";
 import { ErrorBox, PageHeader, Spinner, useAction } from "../components/ui";
+import AiBudgetCard from "../components/AiBudgetCard";
 
 export default function Setup() {
   const { status, reloadStatus } = useApp();
@@ -80,6 +81,8 @@ export default function Setup() {
         {field("GEMINI_API_KEY", "Gemini API key", "AQ.… or AIza…")}
         <p className="mt-2 text-xs text-zinc-400">Powers Gemini voiceover, Gemini AI Pictures for historical scenes, and AI script generation.</p>
       </Section>
+
+      <AiBudgetCard />
 
       <Section ok={status.voice} title="2b. ElevenLabs voice (optional)">
         <ol className="list-decimal space-y-1.5 pl-5">
