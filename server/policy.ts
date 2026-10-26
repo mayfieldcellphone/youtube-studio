@@ -220,6 +220,8 @@ export interface Variation {
   intro: string;
   outro: string;
   look: "cinematic" | "clean" | "warm";
+  /** Story format (see TECHNIQUES); videos made before it existed don't have one */
+  technique?: string;
   assignedAt: string;
 }
 
@@ -234,6 +236,39 @@ export const OUTRO_STYLES: { id: string; subscribe: string; brief: string }[] = 
   { id: "echo-reveal", subscribe: "Subscribe for the next case.", brief: "The last line repeats the opening line's key words with a new meaning now that the viewer knows the answer." },
   { id: "question-loop", subscribe: "Subscribe so you don't miss the next case.", brief: "The last line turns the opening claim into a question the video has just answered, or one it hasn't." },
   { id: "twist-callback", subscribe: "Subscribe, because the next case is stranger.", brief: "The last line flips the opening claim with a final twist that reuses its wording." },
+];
+
+/**
+ * Story formats that inject a popular pop-culture hook (a film, series, game or book the audience
+ * already knows) into a documented history story. They differ in structure, not just wording, so
+ * consecutive videos don't read as one template.
+ */
+export const TECHNIQUES: { id: string; name: string; brief: string }[] = [
+  {
+    id: "real-vs-reel",
+    name: "Real vs Reel",
+    brief: "Take ONE claim, scene, object or character from the pop-culture hook. State what the story shows, then what the documented record says, and where the two differ. One claim only, never a list.",
+  },
+  {
+    id: "pov-record",
+    name: "POV from the record",
+    brief: "Second person, present tense: 'You're the surgeon, Paris, 1567.' Put the viewer inside the real moment that inspired the pop-culture hook, narrate it from surviving accounts, then reveal how the story changed it.",
+  },
+  {
+    id: "origin-trace",
+    name: "Origin trace",
+    brief: "Start from the modern thing everyone knows (a spell, prop, phrase, trope) and trace it backwards through two or three documented steps to its surprising real origin.",
+  },
+  {
+    id: "verdict-card",
+    name: "Fact / Myth / Disputed",
+    brief: "Judge three claims about the pop-culture hook in quick succession. Each gets a one-word verdict (FACT, MYTH or DISPUTED) and one line of evidence. The last verdict is the surprising one.",
+  },
+  {
+    id: "receipt-first",
+    name: "Receipt first",
+    brief: "Open on the physical evidence (a will, a letter, a museum object, an inscription) and describe it concretely, then work outward to show how it connects to the pop-culture hook.",
+  },
 ];
 
 export const LOOKS: Variation["look"][] = ["cinematic", "warm", "clean"];
@@ -278,6 +313,7 @@ export function pickVariation(all: Video[], self: Video, now = new Date()): Vari
   return {
     intro: choose(INTRO_STYLES.map((s) => s.id), "intro", flagsFor),
     outro: choose(OUTRO_STYLES.map((s) => s.id), "outro"),
+    technique: choose(TECHNIQUES.map((t) => t.id), "technique", (t) => others.filter((v) => v.variation!.technique === t && v.analytics?.flag).length),
     look: choose([...LOOKS], "look"),
     assignedAt: now.toISOString(),
   };
@@ -287,8 +323,8 @@ export function pickVariation(all: Video[], self: Video, now = new Date()): Vari
 export function assertVariation(all: Video[], video: Video) {
   if (!video.variation) return;
   for (const n of neighbours(all, video)) {
-    for (const key of ["intro", "outro", "look"] as const) {
-      if (n.variation![key] === video.variation[key]) {
+    for (const key of ["intro", "outro", "look", "technique"] as const) {
+      if (n.variation![key] && n.variation![key] === video.variation[key]) {
         throw new Error(
           `"${video.title}" uses the same ${key === "look" ? "visual look" : key + " style"} (${video.variation[key]}) as the neighbouring upload "${n.title}". Regenerate its script so it gets a different one.`,
         );

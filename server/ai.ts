@@ -14,6 +14,7 @@ import {
   OUTRO_STYLES,
   pickVariation,
   SERIES,
+  TECHNIQUES,
   SHORT_DEFAULT_SECONDS,
   SHORT_DEFAULT_WORDS,
   SHORT_MAX_SECONDS,
@@ -76,6 +77,7 @@ function videoBrief(video: Video) {
   return [
     `Format: ${video.format === "short" ? `YouTube Short (vertical, ${SHORT_DEFAULT_SECONDS} seconds, never over ${SHORT_MAX_SECONDS})` : "Long-form video (6-10 minutes)"}`,
     video.series && `Series: ${video.series}`,
+    video.popCulture && `Pop-culture hook: ${video.popCulture}`,
     `Working title: ${video.title}`,
     video.hook && `Hook idea: ${video.hook}`,
     video.angle && `Angle: ${video.angle}`,
@@ -223,7 +225,19 @@ export interface Idea {
   format: "short" | "long";
   keyword: string;
   angle: string;
+  /** The popular film, series, game or book the idea is hooked to (history channels) */
+  popCulture?: string;
 }
+
+/** History channels: every idea pairs a documented story with one pop-culture hook the audience already knows. */
+const POP_CULTURE_IDEAS = `
+POP-CULTURE INJECTION (required for every idea): pair a real, documented history story with ONE popular film, series, game or book that the audience already knows and is talking about now (use the releases, trailers, anniversaries and trends from the search above where they fit). The pop-culture hook is the way in; the history is the payoff. Rules:
+- The link must be true: the history must genuinely connect to something in the hook (an object, character, event, place or claim). Never invent a connection.
+- Name the hook in "popCulture" as "Title: the specific element", e.g. "Harry Potter: Snape's bezoar".
+- Vary the hooks across ideas; do not use the same franchise for more than half of them.
+- Prefer a claim the hook makes that the record contradicts, or a real event the hook was clearly inspired by.
+- Never copy another channel's video; take the pattern, not the topic or wording.
+`;
 
 export async function generateIdeas(channel: Channel, count: number, existingTitles: string[], focus?: string) {
   const safeCount = Math.min(5, Math.max(2, count));
@@ -238,7 +252,7 @@ What makes an idea strong:
 - Strong emotion: awe, dread, outrage, disbelief, or "wait, that's real?".
 - Can be made with narration and stock footage or AI pictures (no filming required).
 - Prefer the timely and untold opportunities from the web search above; skip topics it lists as overdone unless the angle is genuinely new.
-${focus ? `Focus on: ${focus}\n` : ""}${
+${isHistoryChannel(channel) ? POP_CULTURE_IDEAS : ""}${focus ? `Focus on: ${focus}\n` : ""}${
     existingTitles.length
       ? `Do not repeat these existing videos:\n${existingTitles.map((t) => `- ${t}`).join("\n")}\n`
       : ""
@@ -253,6 +267,7 @@ ${focus ? `Focus on: ${focus}\n` : ""}${
         format: { type: "string", enum: ["short", "long"] },
         keyword: str("Main search phrase this video should rank for"),
         angle: str("One sentence: what makes this video different, and why people want it now"),
+        popCulture: str(isHistoryChannel(channel) ? 'The popular film, series, game or book it is hooked to, as "Title: specific element"' : "Leave empty"),
       }),
     },
   }));
@@ -361,7 +376,11 @@ ${focus ? `Focus: ${focus}\n` : ""}
 Today is ${today}. Search the web to find video topics for this channel that people want to watch right now. Look for:
 - Recent news in the niche: new discoveries, reopened cases, anniversaries in the next 2 months, new documentaries, books or court rulings.
 - Topics getting a lot of views on YouTube and social media lately in this niche, and which angles are already overdone.
-- Lesser-known stories with a strong, specific hook that big channels haven't covered well.
+- Lesser-known stories with a strong, specific hook that big channels haven't covered well.${
+        isHistoryChannel(channel)
+          ? "\n- Films, series, games and books that are popular right now or release in the next 2 months (trailers, new seasons, anniversaries), and the real history behind their props, characters, places and claims, because each idea will be hooked to one of them."
+          : ""
+      }
 Write plain-text notes: 12-20 topic opportunities, one per line, each with the specific hook and why it would get views now (timely, proven demand, or untold). Then list 5 topics that are overdone and should be avoided unless there is a genuinely new angle. Under 700 words, no URLs.`,
       6,
     );
@@ -403,7 +422,11 @@ function scriptCraft(video: Video, variation?: Variation) {
 - Climax: the biggest reveal. Then resolution: what we know, what is still unknown, and why it matters.
 - Final line teases a related story to watch next.`;
 
-  return `${shape}
+  const technique = TECHNIQUES.find((t) => t.id === variation?.technique);
+  const injection = technique
+    ? `\n\nSTORY FORMAT for this video: ${technique.name}. ${technique.brief}${video.popCulture ? `\nThe pop-culture hook is: ${video.popCulture}. Name it once, early, so viewers know why they're watching. Only say what the research notes support about how the hook relates to the history.` : ""}`
+    : "";
+  return `${shape}${injection}
 
 VOICE AND STYLE (this is narration for a voiceover, so write for the ear):
 - The first sentence is the hook and must land inside the first 5 seconds of speech: a concrete, startling moment, not background.

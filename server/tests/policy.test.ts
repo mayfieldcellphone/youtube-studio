@@ -122,6 +122,7 @@ test("Shorts get one slot per day at 7pm Sydney; long videos one per week", () =
 test("intro, outro and look never repeat on consecutive uploads and all three intro styles rotate", () => {
   const all: Video[] = [];
   const intros = new Set<string>();
+  const techniques = new Set<string>();
   let prev: Video | undefined;
   for (let i = 0; i < 12; i++) {
     const v = video({ createdAt: new Date(Date.UTC(2026, 9, 1 + i)).toISOString() });
@@ -130,12 +131,15 @@ test("intro, outro and look never repeat on consecutive uploads and all three in
       assert.notEqual(v.variation.intro, prev.variation!.intro);
       assert.notEqual(v.variation.outro, prev.variation!.outro);
       assert.notEqual(v.variation.look, prev.variation!.look);
+      assert.notEqual(v.variation.technique, prev.variation!.technique);
     }
     intros.add(v.variation.intro);
+    techniques.add(v.variation.technique!);
     all.push(v);
     prev = v;
   }
   assert.ok(intros.size >= 3);
+  assert.ok(techniques.size >= 4, "story formats rotate");
   const clash = video({ variation: { ...all[0].variation! }, scheduledAt: new Date(Date.UTC(2026, 9, 1, 12)).toISOString() });
   assert.throws(() => assertVariation(all, clash), /same/);
 });
