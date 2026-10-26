@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { google } from "googleapis";
-import { db, type Channel, type Video } from "./db";
+import { db, type Channel, type DemandCheck, type Video } from "./db";
 import { appUrl } from "./settings";
 import {
   analyticsDue,
@@ -11,6 +11,8 @@ import {
   buildDescription,
   buildTags,
   checkShortScript,
+  demandVerdict,
+  RECENT_DAYS,
   finalTitle,
   isHistoryChannel,
   rewriteAdvice,
@@ -380,4 +382,36 @@ export async function pullDueAnalytics(channel: Channel) {
       console.error(`Analytics for "${video.title}" failed: ${message}`);
     }
   }
+}
+
+/**
+ * Demand vs supply for a pop-culture hook: how many videos on it were uploaded in the last 14 days,
+ * and how many views the best of them (and the best of all time) have. Costs about 200 API quota
+ * units (two searches) plus one cheap statistics lookup; the daily quota is 10,000.
+ */
+export async function competitionSnapshot(channel: Channel, query: string): Promise<DemandCheck> {
+  const yt = api(channel);
+  const since = new Date(Date.now() - RECENT_DAYS * 24 * 3_600_000).toISOString();
+  const [recent, overall] = await Promise.all([
+    yt.search.list({ part: ["id"], q: query, type: ["video"], publishedAfter: since, order: "viewCount", maxResults: 25 }),
+    yt.search.list({ part: ["id"], q: query, type: ["video"], order: "viewCount", maxResults: 5 }),
+  ]);
+  const ids = (r: typeof recent) => (r.data.items ?? []).map((i) => i.id?.videoId).filter((x): x is string => !!x);
+  const recentIds = ids(recent);
+  const topIds = ids(overall);
+  const all = [...new Set([...recentIds, ...topIds])];
+  const views = new Map<string, number>();
+  if (all.length) {
+    const stats = await yt.videos.list({ part: ["statistics"], id: all, maxResults: 50 });
+    for (const v of stats.data.items ?? []) views.set(v.id!, Number(v.statistics?.viewCount ?? 0));
+  }
+  const max = (list: string[]) => list.reduce((m, id) => Math.max(m, views.get(id) ?? 0), 0);
+  const base = {
+    checkedAt: new Date().toISOString(),
+    query,
+    recentUploads: recentIds.length,
+    topRecentViews: max(recentIds),
+    topViews: max(topIds),
+  };
+  return { ...base, ...demandVerdict(base) };
 }

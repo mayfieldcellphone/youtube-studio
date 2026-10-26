@@ -159,6 +159,30 @@ export interface VideoAnalytics {
   error?: string;
 }
 
+export interface DemandCheck {
+  checkedAt: string;
+  query: string;
+  /** Videos on this hook uploaded in the last 14 days */
+  recentUploads: number;
+  /** Views of the most-viewed of those recent videos */
+  topRecentViews: number;
+  /** Views of the most-viewed result overall (any age) */
+  topViews: number;
+  verdict: "gap" | "open" | "crowded" | "unknown";
+  advice: string;
+}
+
+export interface ThumbBrief {
+  /** Top line: grabs attention (max 4 words) */
+  top: string;
+  /** Bottom line: completes the thought / punchline (max 4 words) */
+  bottom: string;
+  /** The single feeling the thumbnail should trigger */
+  emotion: string;
+  /** What the picture shows; must be something that appears in the video */
+  visual: string;
+}
+
 export interface Video {
   id: string;
   channelId: string;
@@ -180,6 +204,14 @@ export interface Video {
   pipeline?: PipelineJob;
   /** The popular film, series, game or book this video is hooked to, e.g. "Harry Potter: Snape's bezoar" */
   popCulture?: string;
+  /** When the trend behind this video happened (ISO). The video is scheduled no earlier than this. */
+  trendAt?: string;
+  /** Short note on the trend event, e.g. "Season 2 trailer released" */
+  trendNote?: string;
+  /** Demand vs supply snapshot from YouTube search (see policy.demandVerdict) */
+  demand?: DemandCheck;
+  /** Thumbnail plan: two short lines of text, one emotion, what the picture shows */
+  thumbBrief?: ThumbBrief;
   /** Series name, e.g. "Hogwarts vs History"; uploads are added to a playlist of this name */
   series?: string;
   /** Series subject used in the series title, e.g. "Nicolas Flamel" */

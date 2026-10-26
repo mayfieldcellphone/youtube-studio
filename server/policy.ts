@@ -1,4 +1,4 @@
-import type { Channel, Video } from "./db";
+import type { Channel, DemandCheck, ThumbBrief, Video } from "./db";
 
 /**
  * Upload rules for the History's Shadows channel (and any channel in the "history" lane).
@@ -382,7 +382,7 @@ const hm = (t: string) => t.split(":").map(Number) as [number, number];
  * other Short; a long video takes the next Saturday at 19:00 Sydney in a week with no other long video.
  * At least 30 minutes ahead, so YouTube has time to process the upload.
  */
-export function nextSlot(channel: Channel, video: Pick<Video, "id" | "format">, all: Video[], from = new Date()): Date {
+export function nextSlot(channel: Channel, video: Pick<Video, "id" | "format"> & { trendAt?: string }, all: Video[], from = new Date()): Date {
   const tz = channel.timeZone || DEFAULT_TZ;
   const short = video.format === "short";
   const [h, min] = hm(short ? channel.shortTime || SHORT_TIME : channel.longTime || LONG_TIME);
@@ -391,8 +391,10 @@ export function nextSlot(channel: Channel, video: Pick<Video, "id" | "format">, 
     (v) => v.id !== video.id && v.channelId === channel.id && v.format === video.format && v.scheduledAt && (v.youtubeVideoId || v.status === "scheduled"),
   );
   const takenKeys = new Set(taken.map((v) => (short ? dayKey(Date.parse(v.scheduledAt!), tz) : weekKey(Date.parse(v.scheduledAt!), tz))));
-  const earliest = from.getTime() + 30 * 60 * 1000;
-  const today = partsIn(from.getTime(), tz);
+  // A trend-linked video goes out at the first normal slot after the trend event, never before it.
+  const trendMs = video.trendAt ? Date.parse(video.trendAt) : NaN;
+  const earliest = Math.max(from.getTime() + 30 * 60 * 1000, Number.isFinite(trendMs) ? trendMs : 0);
+  const today = partsIn(Math.max(from.getTime(), Number.isFinite(trendMs) ? trendMs : 0), tz);
   for (let i = 0; i < 400; i++) {
     const slot = zonedTime(today.y, today.m, today.d + i, h, min, tz);
     if (slot.getTime() <= earliest) continue;
@@ -450,4 +452,69 @@ export function rewriteAdvice(video: Video) {
   const used = video.variation?.intro;
   const next = INTRO_STYLES.filter((s) => s.id !== used).map((s) => s.id);
   return `Averaged ${video.analytics?.averageViewPercentage?.toFixed(0)}% viewed (target 40%+). Rewrite the hook${used ? ` — "${used}" didn't hold viewers; try ${next.join(", ")}` : ""}.`;
+}
+
+
+// ---------- Trend injection: demand vs supply ----------
+
+export const RECENT_DAYS = 14;
+
+/**
+ * Reads a YouTube search snapshot for a pop-culture hook.
+ * "gap": people watch the topic but few recent uploads exist (the opening to aim for).
+ * "open": little supply and little proven demand: fine to try, no strong signal.
+ * "crowded": many recent uploads already; needs a clearly different angle.
+ */
+export function demandVerdict(c: Pick<DemandCheck, "recentUploads" | "topRecentViews" | "topViews">): { verdict: DemandCheck["verdict"]; advice: string } {
+  const { recentUploads: n, topRecentViews: recent, topViews: top } = c;
+  if (n < 0 || top < 0) return { verdict: "unknown", advice: "No search data. Decide on the angle alone." };
+  if (n >= 12) return { verdict: "crowded", advice: `${n} videos on this hook in the last ${RECENT_DAYS} days. Only make it with an angle none of them has, or pick another hook.` };
+  if (top >= 100_000 && n <= 5) return { verdict: "gap", advice: `Viewers clearly want this (top result ${top.toLocaleString("en-US")} views) and only ${n} recent upload${n === 1 ? "" : "s"} exist. Publish soon, right after the trend event.` };
+  if (recent >= 20_000 && n <= 8) return { verdict: "gap", advice: `A recent upload already earned ${recent.toLocaleString("en-US")} views with ${n} competing uploads. Demand is live: publish soon.` };
+  return { verdict: "open", advice: "Little competition but no proven demand yet. A fine test; do not over-invest." };
+}
+
+// ---------- Thumbnail brief ----------
+
+export const THUMB_LINE_MAX_WORDS = 4;
+
+const thumbWords = (t: string) => t.trim().split(/\s+/).filter(Boolean);
+
+/** Trims a brief to the two-line, readable-in-half-a-second shape. Returns undefined when unusable. */
+export function cleanThumbBrief(b?: Partial<ThumbBrief> | null): ThumbBrief | undefined {
+  if (!b) return undefined;
+  const clip = (t?: string) => thumbWords(t ?? "").slice(0, THUMB_LINE_MAX_WORDS).join(" ").toUpperCase();
+  const top = clip(b.top);
+  const bottom = clip(b.bottom);
+  const emotion = (b.emotion ?? "").trim();
+  const visual = (b.visual ?? "").trim();
+  if (!top || !bottom || !visual) return undefined;
+  return { top, bottom, emotion: emotion || "curiosity", visual };
+}
+
+// ---------- Series compilation (many episodes -> one longer video) ----------
+
+export interface CompilationInput {
+  id: string;
+  title: string;
+  seriesSubject?: string;
+  angle: string;
+}
+
+/** Minimum episodes before a compilation makes sense. */
+export const COMPILATION_MIN = 3;
+
+/** Merges published/finished episodes of one series into the brief for a long-form compilation. */
+export function buildCompilation(series: string, episodes: CompilationInput[]) {
+  if (episodes.length < COMPILATION_MIN) {
+    throw new Error(`A compilation needs at least ${COMPILATION_MIN} videos in the "${series}" series (found ${episodes.length}).`);
+  }
+  const names = episodes.map((e) => e.seriesSubject || e.title);
+  const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0];
+  return {
+    title: `${series}: ${names.length} Cases the Movies Got Wrong`,
+    angle: `Compilation of ${names.length} ${series} episodes (${list}). Re-tell each case in order, with fresh transitions and one shared question that ties them together. Use each episode's own research notes; do not paste the Short scripts.`,
+    hook: `${names.length} stories you think you know, and what the record actually says.`,
+    sourceIds: episodes.map((e) => e.id),
+  };
 }

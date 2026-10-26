@@ -235,6 +235,49 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
             />
             <p className="mt-1 text-xs text-zinc-500">The film, series, game or book this story is hooked to. The script names it early and uses a story format that rotates between videos.</p>
           </Labeled>
+          <Labeled label="Trend (optional)">
+            <input
+              type="date"
+              defaultValue={video.trendAt ? video.trendAt.slice(0, 10) : ""}
+              disabled={onYouTube}
+              onBlur={(e) => {
+                const v = e.target.value;
+                const next = v ? new Date(`${v}T00:00:00Z`).toISOString() : null;
+                if ((next ?? "") !== (video.trendAt ?? "")) run("save", async () => apply(await api.updateVideo(video.id, { trendAt: next })));
+              }}
+            />
+            <p className="mt-1 text-xs text-zinc-500">
+              {video.trendNote ? `${video.trendNote}. ` : ""}The date of the event this video rides on (trailer, release, anniversary). It is scheduled no earlier than this, so it lands right after the trend starts.
+            </p>
+          </Labeled>
+          {video.popCulture && (
+            <Labeled label="Demand vs competition">
+              {video.demand ? (
+                <p className={`text-sm ${video.demand.verdict === "gap" ? "text-emerald-300" : video.demand.verdict === "crowded" ? "text-amber-300" : "text-zinc-400"}`}>
+                  {video.demand.verdict === "gap" ? "Gap: " : video.demand.verdict === "crowded" ? "Crowded: " : ""}
+                  {video.demand.advice} ({video.demand.recentUploads} uploads in 14 days, best {video.demand.topRecentViews.toLocaleString()} views.)
+                </p>
+              ) : (
+                <p className="text-sm text-zinc-500">Not checked yet.</p>
+              )}
+              <button className="btn-secondary mt-2" onClick={() => run("demand", async () => apply(await api.checkDemand(video.id)))}>
+                Check now
+              </button>
+              <p className="mt-1 text-xs text-zinc-500">Searches YouTube for this hook (uses about 200 of the 10,000 daily API units).</p>
+            </Labeled>
+          )}
+          {video.thumbBrief && (
+            <Labeled label="Thumbnail plan">
+              <p className="text-sm text-zinc-200">
+                <span className="font-semibold">{video.thumbBrief.top}</span>
+                <br />
+                <span className="font-semibold">{video.thumbBrief.bottom}</span>
+              </p>
+              <p className="mt-1 text-xs text-zinc-500">
+                Feel: {video.thumbBrief.emotion}. Picture: {video.thumbBrief.visual}. Two short lines: the top grabs attention, the bottom finishes the thought. Only show things that are in the video.
+              </p>
+            </Labeled>
+          )}
           <Labeled label="Series (optional)">
             <input
               list="series-names"
@@ -251,6 +294,19 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
               <option value="Heartbeat Hunt" />
             </datalist>
             <p className="mt-1 text-xs text-zinc-500">
+              {video.series && video.format === "short" && (
+                <button
+                  className="btn-secondary mb-1 block"
+                  onClick={() =>
+                    run("compile", async () => {
+                      const c = await api.compileSeries(video.channelId, video.series!);
+                      navigate(`/videos/${c.id}`);
+                    })
+                  }
+                >
+                  Compile this series into one long video
+                </button>
+              )}
               Each upload is added to a YouTube playlist with this name. "Hogwarts vs History" titles read "The Real [Name]: What Harry Potter Got Wrong".
             </p>
           </Labeled>
