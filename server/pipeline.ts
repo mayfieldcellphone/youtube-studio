@@ -2,6 +2,7 @@ import { db, type Channel, type StopAfter, type Video } from "./db";
 import { generateMetadata, generateScript, research } from "./ai";
 import { startRender } from "./render";
 import { uploadAndSchedule } from "./youtube";
+import { isHistoryChannel, nextSlot as policySlot } from "./policy";
 
 /**
  * Produces videos automatically: research → script → video → title/description → schedule,
@@ -102,6 +103,8 @@ async function run(videoId: string, stopAfter: StopAfter) {
         title: meta.titles[0] || video.title,
         description: meta.description,
         tags: meta.tags,
+        ...(meta.topicTags && { topicTags: meta.topicTags }),
+        ...(meta.subject && !video.seriesSubject && { seriesSubject: meta.subject }),
       })!;
     }
     if (stopAfter === "video") return finish(videoId, { result: "Ready for your review" });
@@ -109,7 +112,7 @@ async function run(videoId: string, stopAfter: StopAfter) {
     video = step("Scheduling on YouTube");
     const channel = channelOf(video);
     if (!channel.youtube) throw new Error("Connect this channel to YouTube to schedule automatically.");
-    const scheduledAt = nextFreeSlot(channel).toISOString();
+    const scheduledAt = (isHistoryChannel(channel) ? policySlot(channel, video, db.videos()) : nextFreeSlot(channel)).toISOString();
     video = db.updateVideo(videoId, { scheduledAt })!;
     const uploaded = await uploadAndSchedule(video);
     finish(videoId, { result: `Scheduled for ${new Date(uploaded?.scheduledAt ?? scheduledAt).toLocaleString()}` });
