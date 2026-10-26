@@ -128,6 +128,30 @@ export default function Setup() {
         {field("HEDRA_API_KEY", "Hedra API key", "Paste your Hedra key")}
       </Section>
 
+      <Section ok={status.extraAi} title="1b. Another AI for writing (optional, e.g. a free tier)">
+        <p className="mb-2 text-xs text-zinc-300">
+          Any service that speaks the OpenAI chat format works: Groq, OpenRouter (free models end in :free), Mistral, Together, Cerebras and others.
+          It is used only when Claude and Gemini fail or aren't set up. Web research still needs Claude or Gemini. Free models write weaker scripts, so check them.
+        </p>
+        <ol className="list-decimal space-y-1.5 pl-5">
+          <li>Get an API key from the service and copy its <b>base URL</b> (for example <code>https://api.groq.com/openai/v1</code> or <code>https://openrouter.ai/api/v1</code>).</li>
+          <li>Copy the exact <b>model name</b> from the service's model list. Names change, so check it is current.</li>
+        </ol>
+        {field("EXTRA_AI_BASE_URL", "Base URL", "https://api.groq.com/openai/v1", false)}
+        {field("EXTRA_AI_API_KEY", "API key", "Paste the key")}
+        {field("EXTRA_AI_MODEL", "Model name", "Exact model name from the service", false)}
+      </Section>
+
+      <Section ok={status.pixabay} title="3b. Free pictures (Pixabay, optional)">
+        <ol className="list-decimal space-y-1.5 pl-5">
+          <li>Sign up free at <Ext href="https://pixabay.com/api/docs/">pixabay.com/api/docs</Ext> and copy your API key.</li>
+        </ol>
+        {field("PIXABAY_API_KEY", "Pixabay API key", "Paste your Pixabay key")}
+        <p className="mt-2 text-xs text-zinc-500">
+          Used by "Free pictures first" channels, after Pexels. Wikimedia Commons public-domain photos are also searched and need no key.
+        </p>
+      </Section>
+
       <Section ok={status.footage} title="3. Stock footage (Pexels, free)">
         <ol className="list-decimal space-y-1.5 pl-5">
           <li>Sign up free at <Ext href="https://www.pexels.com/api/">pexels.com/api</Ext>, click <b>Get Started</b>, and copy your API key.</li>

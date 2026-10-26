@@ -13,6 +13,10 @@ export const SETTING_KEYS = [
   "ELEVENLABS_API_KEY",
   "GEMINI_API_KEY",
   "PEXELS_API_KEY",
+  "PIXABAY_API_KEY",
+  "EXTRA_AI_BASE_URL",
+  "EXTRA_AI_API_KEY",
+  "EXTRA_AI_MODEL",
   "HEDRA_API_KEY",
   "GOOGLE_CLIENT_ID",
   "GOOGLE_CLIENT_SECRET",
@@ -22,7 +26,7 @@ export const SETTING_KEYS = [
 export type SettingKey = (typeof SETTING_KEYS)[number];
 
 /** Settings shown in full on the Setup page; everything else is secret and only hinted at. */
-const PUBLIC_KEYS: SettingKey[] = ["APP_URL", "GOOGLE_CLIENT_ID"];
+const PUBLIC_KEYS: SettingKey[] = ["APP_URL", "GOOGLE_CLIENT_ID", "EXTRA_AI_BASE_URL", "EXTRA_AI_MODEL"];
 
 const FILE = path.join(DATA_DIR, "settings.json");
 

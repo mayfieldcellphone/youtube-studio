@@ -45,7 +45,11 @@ const anthropic = () => {
   return client;
 };
 
-export const aiConfigured = () => Boolean(process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY);
+/** Any OpenAI-compatible service (Groq, OpenRouter, Mistral, Together, …) set up on the Setup page. */
+export const extraAiConfigured = () =>
+  Boolean(process.env.EXTRA_AI_BASE_URL && process.env.EXTRA_AI_API_KEY && process.env.EXTRA_AI_MODEL);
+
+export const aiConfigured = () => Boolean(process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY || extraAiConfigured());
 
 const SYSTEM = `You are a YouTube strategist and scriptwriter who grows channels that earn money.
 You know what makes people click (specific, curiosity-driven titles that tell the truth) and what makes them keep watching (a hook in the first 3 seconds, fast pacing, payoff that matches the title).
@@ -147,25 +151,70 @@ async function generateWithAnthropic<T>(prompt: string, schema: Schema): Promise
   return JSON.parse(text.text) as T;
 }
 
-/** Calls Anthropic or Gemini with a JSON schema and returns the parsed result. */
+/** Parses a model's JSON answer, tolerating code fences and text around the object. */
+export function parseJsonAnswer<T>(raw: string): T {
+  const cleaned = raw.replace(/^\s*```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+  try {
+    return JSON.parse(cleaned) as T;
+  } catch {
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    if (start >= 0 && end > start) return JSON.parse(cleaned.slice(start, end + 1)) as T;
+    throw new Error("The AI didn't return valid JSON.");
+  }
+}
+
+/** Calls any OpenAI-compatible chat endpoint (the "extra AI" on the Setup page) in JSON mode. */
+async function generateWithExtra<T>(prompt: string, schema: Schema): Promise<T> {
+  if (!extraAiConfigured()) throw new Error("The extra AI isn't set up.");
+  const base = process.env.EXTRA_AI_BASE_URL!.replace(/\/+$/, "");
+  const res = await fetch(`${base}/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.EXTRA_AI_API_KEY}` },
+    body: JSON.stringify({
+      model: process.env.EXTRA_AI_MODEL,
+      temperature: 0.8,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: `${SYSTEM}\n\nReturn ONLY one JSON object matching this schema, with no other text:\n${JSON.stringify(schema)}` },
+        { role: "user", content: prompt },
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error(`Extra AI error ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const data: any = await res.json();
+  const text = data?.choices?.[0]?.message?.content;
+  if (!text) throw new Error("The extra AI returned no text.");
+  return parseJsonAnswer<T>(text);
+}
+
+type ProviderName = "claude" | "gemini" | "extra";
+
+/** The AI services that are set up, in the order they are tried: Claude, Gemini, then the extra one. */
+export function providerOrder(env: Record<string, string | undefined> = process.env): ProviderName[] {
+  const order: ProviderName[] = [];
+  if (env.ANTHROPIC_API_KEY) order.push("claude");
+  if (env.GEMINI_API_KEY) order.push("gemini");
+  if (env.EXTRA_AI_BASE_URL && env.EXTRA_AI_API_KEY && env.EXTRA_AI_MODEL) order.push("extra");
+  return order;
+}
+
+/** Calls the first AI service that works, with a JSON schema, and returns the parsed result. */
 async function generate<T>(prompt: string, schema: Schema): Promise<T> {
-  if (process.env.ANTHROPIC_API_KEY) {
+  const chain = providerOrder();
+  if (!chain.length) {
+    throw new Error("No AI API key configured. Add your Claude (Anthropic), Gemini (Google AI Studio) or another AI's key on the Setup page.");
+  }
+  let firstErr: unknown;
+  for (const name of chain) {
     try {
-      return await generateWithAnthropic<T>(prompt, schema);
+      return name === "claude" ? await generateWithAnthropic<T>(prompt, schema) : name === "gemini" ? await generateWithGemini<T>(prompt, schema) : await generateWithExtra<T>(prompt, schema);
     } catch (err) {
-      console.warn("Anthropic generation error, trying Gemini fallback:", err);
-      if (process.env.GEMINI_API_KEY) {
-        return await generateWithGemini<T>(prompt, schema);
-      }
-      throw err;
+      firstErr ??= err;
+      console.warn(`${name} generation error${name === chain[chain.length - 1] ? "" : ", trying the next AI"}:`, (err as Error).message);
     }
   }
-
-  if (process.env.GEMINI_API_KEY) {
-    return await generateWithGemini<T>(prompt, schema);
-  }
-
-  throw new Error("No AI API key configured. Add your Claude (Anthropic) or Gemini (Google AI Studio) key on the Setup page.");
+  throw firstErr;
 }
 
 export interface Idea {
