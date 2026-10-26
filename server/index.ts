@@ -415,6 +415,7 @@ const videoPatch = z
     description: z.string().max(5000),
     tags: z.array(z.string().max(100)).max(50),
     scheduledAt: z.string().datetime({ offset: true }).nullable(),
+    popCulture: z.string().trim().max(200).nullable(),
     series: z.string().trim().max(100).nullable(),
     seriesSubject: z.string().trim().max(100).nullable(),
     lane: z.enum(["history", "drama"]).nullable(),
@@ -429,7 +430,7 @@ app.patch("/api/videos/:id", (req, res) => {
   if (video.youtubeVideoId && (patch.title !== undefined || patch.scheduledAt !== undefined)) {
     throw new HttpError(400, "This video is already on YouTube. Edit it in YouTube Studio.");
   }
-  const { scheduledAt, series, seriesSubject, lane, channelId, ...rest } = patch;
+  const { scheduledAt, series, seriesSubject, popCulture, lane, channelId, ...rest } = patch;
   if (channelId !== undefined && channelId !== video.channelId) {
     if (video.youtubeVideoId) throw new HttpError(400, "This video is already on YouTube, so it can't move to another channel.");
     const target = getChannel(channelId);
@@ -447,6 +448,7 @@ app.patch("/api/videos/:id", (req, res) => {
         ...(scheduledAt !== undefined && { scheduledAt: scheduledAt ?? undefined }),
         ...(series !== undefined && { series: series ?? undefined }),
         ...(seriesSubject !== undefined && { seriesSubject: seriesSubject ?? undefined }),
+        ...(popCulture !== undefined && { popCulture: popCulture ?? undefined }),
         ...(lane !== undefined && { lane: lane ?? undefined }),
       })!,
     ),

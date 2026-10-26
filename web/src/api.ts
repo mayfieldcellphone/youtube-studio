@@ -114,8 +114,9 @@ export interface Video {
   error?: string;
   series?: string;
   seriesSubject?: string;
+  popCulture?: string;
   lane?: "history" | "drama";
-  variation?: { intro: string; outro: string; look: string; assignedAt: string };
+  variation?: { intro: string; outro: string; look: string; technique?: string; assignedAt: string };
   durationSeconds?: number;
   analytics?: { views: number; averageViewPercentage: number; subscribersGained: number; pulledAt: string; final?: boolean; flag?: "rewrite-hook"; note?: string; error?: string };
   stats?: { views: number; likes: number; comments: number; updatedAt: string };
@@ -221,7 +222,7 @@ export const api = {
   createVideo: (v: { channelId: string; title: string; format: VideoFormat; series?: string }) =>
     request<Video>("POST", "/api/videos", v),
   nextSlot: (id: string) => request<{ scheduledAt: string }>("GET", `/api/videos/${id}/next-slot`),
-  updateVideo: (id: string, v: Partial<Omit<Video, "scheduledAt" | "series" | "seriesSubject" | "lane">> & { scheduledAt?: string | null; series?: string | null; seriesSubject?: string | null; lane?: "history" | "drama" | null }) =>
+  updateVideo: (id: string, v: Partial<Omit<Video, "scheduledAt" | "series" | "seriesSubject" | "popCulture" | "lane">> & { scheduledAt?: string | null; series?: string | null; seriesSubject?: string | null; popCulture?: string | null; lane?: "history" | "drama" | null }) =>
     request<Video>("PATCH", `/api/videos/${id}`, v),
   deleteVideo: (id: string) => request("DELETE", `/api/videos/${id}`),
   research: (id: string) => request<Video>("POST", `/api/videos/${id}/research`),

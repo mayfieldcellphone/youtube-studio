@@ -178,6 +178,8 @@ export interface Video {
   /** The last made video has dramatised scenes voiced by AI characters (disclosed on upload). */
   characterVoicesUsed?: boolean;
   pipeline?: PipelineJob;
+  /** The popular film, series, game or book this video is hooked to, e.g. "Harry Potter: Snape's bezoar" */
+  popCulture?: string;
   /** Series name, e.g. "Hogwarts vs History"; uploads are added to a playlist of this name */
   series?: string;
   /** Series subject used in the series title, e.g. "Nicolas Flamel" */

@@ -223,6 +223,18 @@ export default function VideoEditor({ videoId }: { videoId: string }) {
           <Labeled label="Angle">
             <textarea rows={3} value={draft.angle} onChange={set("angle")} onBlur={save("angle")} />
           </Labeled>
+          <Labeled label="Pop-culture hook (optional)">
+            <input
+              defaultValue={video.popCulture ?? ""}
+              placeholder="e.g. Harry Potter: Snape's bezoar"
+              disabled={onYouTube}
+              onBlur={(e) => {
+                const v = e.target.value.trim();
+                if (v !== (video.popCulture ?? "")) run("save", async () => apply(await api.updateVideo(video.id, { popCulture: v || null })));
+              }}
+            />
+            <p className="mt-1 text-xs text-zinc-500">The film, series, game or book this story is hooked to. The script names it early and uses a story format that rotates between videos.</p>
+          </Labeled>
           <Labeled label="Series (optional)">
             <input
               list="series-names"
