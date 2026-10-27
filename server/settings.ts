@@ -13,6 +13,8 @@ export const SETTING_KEYS = [
   "ANTHROPIC_API_KEY",
   "ELEVENLABS_API_KEY",
   "GEMINI_API_KEY",
+  "SNAPGEN_API_KEY",
+  "SNAPGEN_MODEL",
   "PEXELS_API_KEY",
   "PIXABAY_API_KEY",
   "EXTRA_AI_BASE_URL",
@@ -28,7 +30,7 @@ export const SETTING_KEYS = [
 export type SettingKey = (typeof SETTING_KEYS)[number];
 
 /** Settings shown in full on the Setup page; everything else is secret and only hinted at. */
-const PUBLIC_KEYS: SettingKey[] = ["APP_URL", "GOOGLE_CLIENT_ID", "EXTRA_AI_BASE_URL", "EXTRA_AI_MODEL", "AI_FOOTAGE_MONTHLY_CAP_USD"];
+const PUBLIC_KEYS: SettingKey[] = ["APP_URL", "GOOGLE_CLIENT_ID", "EXTRA_AI_BASE_URL", "EXTRA_AI_MODEL", "AI_FOOTAGE_MONTHLY_CAP_USD", "SNAPGEN_MODEL"];
 
 const FILE = path.join(DATA_DIR, "settings.json");
 
@@ -68,6 +70,11 @@ export function wrongBox(key: SettingKey, value: string) {
       ? undefined
       : "The AI footage budget must be a number of dollars, like 40.";
   }
+  // SnapGen keys have no fixed look, but the keys of the other services are easy to recognise.
+  if (key === "SNAPGEN_API_KEY") {
+    const other = value && LOOKS_LIKE.find(([pattern]) => pattern.test(value))?.[1];
+    return other ? `This looks like ${other}, not a SnapGen key. Create the key in your SnapGen account (Service Integration).` : undefined;
+  }
   const expected = EXPECTED[key];
   if (!expected || !value || expected.pattern.test(value)) return undefined;
   const actual = LOOKS_LIKE.find(([pattern]) => pattern.test(value))?.[1];
@@ -84,7 +91,7 @@ export function wrongBox(key: SettingKey, value: string) {
 export function keyProblems() {
   return SETTING_KEYS.flatMap((key) => {
     const problem = wrongBox(key, process.env[key] ?? "");
-    return problem ? [`${EXPECTED[key]?.box ?? key}: ${problem}`] : [];
+    return problem ? [`${EXPECTED[key]?.box ?? (key === "SNAPGEN_API_KEY" ? "2a+. SnapGen video" : key)}: ${problem}`] : [];
   });
 }
 
